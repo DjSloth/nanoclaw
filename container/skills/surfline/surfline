@@ -1,0 +1,137 @@
+#!/usr/bin/env bash
+set -uo pipefail
+
+SURFLINE_BASE="https://services.surfline.com"
+
+usage() {
+  cat <<'EOF'
+Usage: surfline <command> [args]
+
+Commands:
+  conditions <spotId>         Current conditions for a spot
+  forecast <spotId> [days]    Hourly wave forecast (default: 1 day)
+  search <query>              Find spot IDs by name
+  favorites                   List favorite spots
+EOF
+  exit 1
+}
+
+cmd_conditions() {
+  local spot_id="${1:?Usage: surfline conditions <spotId>}"
+  local url="${SURFLINE_BASE}/kbyg/spots/reports?spotId=${spot_id}"
+
+  local json
+  json=$(curl -sf --max-time 15 "$url") || { echo "Error: failed to fetch conditions for ${spot_id}"; exit 1; }
+
+  local name rating
+  name=$(echo "$json" | jq -r '.spot.name // "Unknown"')
+  rating=$(echo "$json" | jq -r '.forecast.conditions.value // "Unknown"')
+
+  local wave_min wave_max wave_human
+  wave_min=$(echo "$json" | jq -r '.forecast.waveHeight.min // "?"')
+  wave_max=$(echo "$json" | jq -r '.forecast.waveHeight.max // "?"')
+  wave_human=$(echo "$json" | jq -r '.forecast.waveHeight.humanRelation // ""')
+
+  local wind_speed wind_dir wind_gust
+  wind_speed=$(echo "$json" | jq -r '.forecast.wind.speed // "?"')
+  wind_dir=$(echo "$json" | jq -r '.forecast.wind.directionType // "?"')
+  wind_gust=$(echo "$json" | jq -r '.forecast.wind.gust // "?"')
+
+  local water_temp
+  water_temp=$(echo "$json" | jq -r '.forecast.waterTemp.max // .forecast.waterTemp.min // "?"')
+
+  local tide_current tide_next
+  tide_current=$(echo "$json" | jq -r '.forecast.tide.current | "\(.type) (\(.height)m)" // "?"')
+  tide_next=$(echo "$json" | jq -r '.forecast.tide.next | "\(.type) (\(.height)m)" // "?"')
+
+  # Read units from the response
+  local wave_unit wind_unit temp_unit
+  wave_unit=$(echo "$json" | jq -r '.units.waveHeight // "M"')
+  wind_unit=$(echo "$json" | jq -r '.units.windSpeed // "KPH"')
+  temp_unit=$(echo "$json" | jq -r '.units.temperature // "C"')
+
+  local wave_display="${wave_min}-${wave_max}m"
+  [ "$wave_unit" = "FT" ] && wave_display="${wave_min}-${wave_max}ft"
+  [ -n "$wave_human" ] && wave_display="${wave_display} (${wave_human})"
+
+  cat <<EOF
+${name}
+  Conditions: ${rating}
+  Waves: ${wave_display}
+  Wind: ${wind_speed} ${wind_unit} ${wind_dir} (gusts ${wind_gust})
+  Water temp: ${water_temp}°${temp_unit}
+  Tide: ${tide_current} → next: ${tide_next}
+EOF
+}
+
+cmd_forecast() {
+  local spot_id="${1:?Usage: surfline forecast <spotId> [days]}"
+  local days="${2:-1}"
+  local url="${SURFLINE_BASE}/kbyg/spots/forecasts/wave?spotId=${spot_id}&days=${days}"
+
+  local json
+  json=$(curl -sf --max-time 15 "$url") || { echo "Error: failed to fetch forecast for ${spot_id}"; exit 1; }
+
+  echo "${spot_id} — ${days}-day wave forecast"
+  echo "---"
+
+  echo "$json" | jq -r '
+    .data.wave[]
+    | (.timestamp + (.utcOffset * 3600) | todate | split("T") | .[0] + " " + (.[1] | split("+")[0] | split("Z")[0] | .[0:5])) as $time
+    | "\($time)  \(.surf.min)-\(.surf.max)m  \(.surf.humanRelation // "")"
+  ' 2>/dev/null || echo "Could not parse forecast data"
+}
+
+cmd_search() {
+  local query="${1:?Usage: surfline search <query>}"
+  local encoded_query
+  encoded_query=$(printf '%s' "$query" | jq -sRr @uri)
+  local url="${SURFLINE_BASE}/search/site?q=${encoded_query}&querySize=5"
+
+  local json
+  json=$(curl -sf --max-time 15 "$url") || { echo "Error: search failed"; exit 1; }
+
+  local count
+  count=$(echo "$json" | jq '[.[0].hits.hits // [] | .[]] | length')
+
+  if [ "$count" = "0" ]; then
+    echo "No spots found for: ${query}"
+    exit 0
+  fi
+
+  echo "Search results for: ${query}"
+  echo "---"
+  echo "$json" | jq -r '
+    .[0].hits.hits[]
+    | "\(._source.name)  ID: \(._id)"
+  '
+}
+
+cmd_favorites() {
+  cat <<'EOF'
+Favorite spots:
+  Sdot Yam              584204204e65fad6a7709aa7
+  Atlit Beach           640a6699451905095aa61467
+  Nazare                58bdfa7882d034001252e3d8
+  Poleg Beach           640a665799dd44dd3d0c88df
+  Backdoor Haifa        640a6677606c4529b9b9fe18
+  Nahsholim             640a668b4519052578a61175
+  Beit Yanai            584204204e65fad6a7709aa8
+  The Rock              60428abd890fe2578439c1dd
+  Hazuk Beach           584204204e65fad6a7709aaf
+  Hiriketiya Beach      640a5e554eb3752f629bd155
+EOF
+}
+
+# --- Main ---
+
+command="${1:-}"
+shift || true
+
+case "$command" in
+  conditions) cmd_conditions "$@" ;;
+  forecast)   cmd_forecast "$@" ;;
+  search)     cmd_search "$@" ;;
+  favorites)  cmd_favorites ;;
+  *)          usage ;;
+esac

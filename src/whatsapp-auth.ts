@@ -130,10 +130,29 @@ async function connectSocket(phoneNumber?: string, isReconnect = false): Promise
       try { fs.unlinkSync(QR_FILE); } catch {}
       console.log('\n✓ Successfully authenticated with WhatsApp!');
       console.log('  Credentials saved to store/auth/');
-      console.log('  You can now start the NanoClaw service.\n');
+      console.log('  Waiting for registration to complete...');
 
-      // Give it a moment to save credentials, then exit
-      setTimeout(() => process.exit(0), 1000);
+      // Wait for registration to complete (up to 10 seconds)
+      let waited = 0;
+      const checkRegistration = setInterval(async () => {
+        waited += 500;
+        try {
+          const creds = JSON.parse(fs.readFileSync(path.join(AUTH_DIR, 'creds.json'), 'utf-8'));
+          if (creds.registered === true || waited >= 10000) {
+            clearInterval(checkRegistration);
+            console.log('  You can now start the NanoClaw service.\n');
+            try {
+              await sock.end(undefined);
+            } catch {}
+            setTimeout(() => process.exit(0), 500);
+          }
+        } catch {
+          if (waited >= 10000) {
+            clearInterval(checkRegistration);
+            process.exit(0);
+          }
+        }
+      }, 500);
     }
   });
 

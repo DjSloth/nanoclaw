@@ -123,14 +123,26 @@ function buildVolumeMounts(
   }
 
   // Sync skills from container/skills/ into each group's .claude/skills/
+  // Also symlink executable tools into .claude/bin/ so they're on the PATH
   const skillsSrc = path.join(process.cwd(), 'container', 'skills');
   const skillsDst = path.join(groupSessionsDir, 'skills');
+  const skillsBin = path.join(groupSessionsDir, 'bin');
+  fs.mkdirSync(skillsBin, { recursive: true });
   if (fs.existsSync(skillsSrc)) {
     for (const skillDir of fs.readdirSync(skillsSrc)) {
       const srcDir = path.join(skillsSrc, skillDir);
       if (!fs.statSync(srcDir).isDirectory()) continue;
       const dstDir = path.join(skillsDst, skillDir);
       fs.cpSync(srcDir, dstDir, { recursive: true });
+      // Symlink executable files (same name as skill dir) into bin/
+      const toolPath = path.join(dstDir, skillDir);
+      const binLink = path.join(skillsBin, skillDir);
+      try {
+        if (fs.existsSync(toolPath) && (fs.statSync(toolPath).mode & 0o111)) {
+          fs.rmSync(binLink, { force: true });
+          fs.symlinkSync(path.join('/home/node/.claude/skills', skillDir, skillDir), binLink);
+        }
+      } catch { /* skip if symlink fails */ }
     }
   }
   mounts.push({
