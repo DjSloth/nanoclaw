@@ -1,0 +1,7 @@
+{
+  "tool_name": "Bash",
+  "tool_input_preview": "{\"command\":\"git remote set-url origin https://github.com/qwibitai/nanoclaw.git && git push\",\"description\":\"Switch origin to HTTPS and push\"}",
+  "error": "Exit code 128\nfatal: could not read Username for 'https://github.com': No such device or address\n\nfatal: could not read Username for 'https://github.com': No such device or address",
+  "timestamp": "2026-02-24T22:07:56.856Z",
+  "retry_count": 2
+}
