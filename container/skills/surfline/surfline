@@ -16,6 +16,15 @@ EOF
   exit 1
 }
 
+# Convert degrees to compass direction (16-point)
+deg_to_compass() {
+  local deg="$1"
+  local dirs=(N NNE NE ENE E ESE SE SSE S SSW SW WSW W WNW NW NNW)
+  local idx
+  idx=$(echo "$deg" | awk '{printf "%d", int(($1 + 11.25) / 22.5) % 16}')
+  echo "${dirs[$idx]}"
+}
+
 cmd_conditions() {
   local spot_id="${1:?Usage: surfline conditions <spotId>}"
   local url="${SURFLINE_BASE}/kbyg/spots/reports?spotId=${spot_id}"
@@ -27,22 +36,48 @@ cmd_conditions() {
   name=$(echo "$json" | jq -r '.spot.name // "Unknown"')
   rating=$(echo "$json" | jq -r '.forecast.conditions.value // "Unknown"')
 
+  # Spot type from travel details
+  local spot_type
+  spot_type=$(echo "$json" | jq -r '(.spot.travelDetails.breakType // []) | join(", ") | gsub("_"; " ")' 2>/dev/null)
+  [ -z "$spot_type" ] && spot_type="Unknown"
+
   local wave_min wave_max wave_human
   wave_min=$(echo "$json" | jq -r '.forecast.waveHeight.min // "?"')
   wave_max=$(echo "$json" | jq -r '.forecast.waveHeight.max // "?"')
   wave_human=$(echo "$json" | jq -r '.forecast.waveHeight.humanRelation // ""')
 
-  local wind_speed wind_dir wind_gust
+  # Primary swell: period, direction, energy
+  local swell_period swell_dir_deg swell_dir energy
+  swell_period=$(echo "$json" | jq -r '.forecast.swells[0].period // "?"')
+  swell_dir_deg=$(echo "$json" | jq -r '.forecast.swells[0].direction // "null"')
+  energy=$(echo "$json" | jq -r '.forecast.swells[0].power // "?"')
+  if [ "$swell_dir_deg" != "null" ] && [ "$swell_dir_deg" != "?" ]; then
+    swell_dir=$(deg_to_compass "$swell_dir_deg")
+  else
+    swell_dir="?"
+  fi
+  # Round energy to integer
+  if [ "$energy" != "?" ]; then
+    energy=$(echo "$energy" | awk '{printf "%d", $1 + 0.5}')
+  fi
+
+  local wind_speed wind_dir_type wind_dir_deg wind_compass wind_gust
   wind_speed=$(echo "$json" | jq -r '.forecast.wind.speed // "?"')
-  wind_dir=$(echo "$json" | jq -r '.forecast.wind.directionType // "?"')
+  wind_dir_type=$(echo "$json" | jq -r '.forecast.wind.directionType // "?"')
+  wind_dir_deg=$(echo "$json" | jq -r '.forecast.wind.direction // "null"')
   wind_gust=$(echo "$json" | jq -r '.forecast.wind.gust // "?"')
+  if [ "$wind_dir_deg" != "null" ] && [ "$wind_dir_deg" != "?" ]; then
+    wind_compass=$(deg_to_compass "$wind_dir_deg")
+  else
+    wind_compass="?"
+  fi
 
   local water_temp
   water_temp=$(echo "$json" | jq -r '.forecast.waterTemp.max // .forecast.waterTemp.min // "?"')
 
   local tide_current tide_next
-  tide_current=$(echo "$json" | jq -r '.forecast.tide.current | "\(.type) (\(.height)m)" // "?"')
-  tide_next=$(echo "$json" | jq -r '.forecast.tide.next | "\(.type) (\(.height)m)" // "?"')
+  tide_current=$(echo "$json" | jq -r 'if .forecast.tide.current then "\(.forecast.tide.current.type) (\(.forecast.tide.current.height)m)" else "?" end')
+  tide_next=$(echo "$json" | jq -r 'if .forecast.tide.next then "\(.forecast.tide.next.type) (\(.forecast.tide.next.height)m)" else "?" end')
 
   # Read units from the response
   local wave_unit wind_unit temp_unit
@@ -55,10 +90,11 @@ cmd_conditions() {
   [ -n "$wave_human" ] && wave_display="${wave_display} (${wave_human})"
 
   cat <<EOF
-${name}
+${name} [${spot_type}]
   Conditions: ${rating}
   Waves: ${wave_display}
-  Wind: ${wind_speed} ${wind_unit} ${wind_dir} (gusts ${wind_gust})
+  Swell: ${swell_dir} @ ${swell_period}s | Energy: ${energy} kJ
+  Wind: ${wind_compass} ${wind_speed} ${wind_unit} ${wind_dir_type} (gusts ${wind_gust})
   Water temp: ${water_temp}°${temp_unit}
   Tide: ${tide_current} → next: ${tide_next}
 EOF
@@ -78,7 +114,12 @@ cmd_forecast() {
   echo "$json" | jq -r '
     .data.wave[]
     | (.timestamp + (.utcOffset * 3600) | todate | split("T") | .[0] + " " + (.[1] | split("+")[0] | split("Z")[0] | .[0:5])) as $time
-    | "\($time)  \(.surf.min)-\(.surf.max)m  \(.surf.humanRelation // "")"
+    | (.swells[0] // {}) as $swell
+    | (if ($swell.direction // null) != null then
+        (["N","NNE","NE","ENE","E","ESE","SE","SSE","S","SSW","SW","WSW","W","WNW","NW","NNW"]
+         | .[(($swell.direction + 11.25) / 22.5 | floor) % 16])
+       else "?" end) as $dir
+    | "\($time)  \(.surf.min)-\(.surf.max)m  \($dir)@\($swell.period // 0)s  \(.power | round)kJ  consistency:\(.probability | round)%  \(.surf.humanRelation // "")"
   ' 2>/dev/null || echo "Could not parse forecast data"
 }
 
