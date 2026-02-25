@@ -71,57 +71,34 @@ These are the user's current favorite Surfline spots. When the user asks about "
 |------|----|
 | Sdot Yam | 584204204e65fad6a7709aa7 |
 | Atlit Beach | 640a6699451905095aa61467 |
-| Nazare | 58bdfa7882d034001252e3d8 |
 | Poleg Beach | 640a665799dd44dd3d0c88df |
-| Backdoor Haifa | 640a6677606c4529b9b9fe18 |
-| Nahsholim | 640a668b4519052578a61175 |
-| Beit Yanai | 584204204e65fad6a7709aa8 |
-| The Rock | 60428abd890fe2578439c1dd |
-| Hazuk Beach | 584204204e65fad6a7709aaf |
-| Hiriketiya Beach | 640a5e554eb3752f629bd155 |
 
 ## Spot knowledge
 
 Use these profiles to assess whether a spot is working. Cross-reference live data (energy, wind, swell direction) against each profile to give informed recommendations.
 
-### Sdot Yam — 584204204e65fad6a7709aa7
+### The Power Plant (Sdot Yam) — 584204204e65fad6a7709aa7
 - **Type**: Deep point break-like spot
 - **Location notes**: North of a power plant, sheltered from southern winds
 - **Energy window**: 150–900 kJ
-- **Wind tolerance**: S to SSW up to 35–40 km/h is fine (sheltered). Other directions less tolerant.
+- **Wind tolerance**: SSE to SSW up to 35–40 km/h is fine (sheltered). Other directions less tolerant.
 - **Swell**: Needs bigger swells to work. Small days won't produce here.
 - **Summary**: A power spot — needs energy but handles south winds well.
 
-### Poleg Beach — 640a665799dd44dd3d0c88df
+### The Sandbox (Poleg Beach) — 640a665799dd44dd3d0c88df
 - **Type**: Shallow beach break
 - **Energy window**: 50–250 kJ
 - **Wind tolerance**: Needs offshore wind (E/SE). Sensitive to onshore.
 - **Swell**: Works on smaller days. Gets messy when too big.
 - **Summary**: The small-day option — clean and fun when it's mellow.
 
-### Atlit Beach — 640a6699451905095aa61467
-- **Profile incomplete** — ask the user for: break type, energy window, wind tolerance, local quirks.
-
-### Backdoor Haifa — 640a6677606c4529b9b9fe18
-- **Profile incomplete** — ask the user for: break type, energy window, wind tolerance, local quirks.
-
-### Nahsholim — 640a668b4519052578a61175
-- **Profile incomplete** — ask the user for: break type, energy window, wind tolerance, local quirks.
-
-### Beit Yanai — 584204204e65fad6a7709aa8
-- **Profile incomplete** — ask the user for: break type, energy window, wind tolerance, local quirks.
-
-### The Rock — 60428abd890fe2578439c1dd
-- **Profile incomplete** — ask the user for: break type, energy window, wind tolerance, local quirks.
-
-### Hazuk Beach — 584204204e65fad6a7709aaf
-- **Profile incomplete** — ask the user for: break type, energy window, wind tolerance, local quirks.
-
-### Nazare — 58bdfa7882d034001252e3d8
-- **Profile incomplete** — ask the user for: break type, energy window, wind tolerance, local quirks.
-
-### Hiriketiya Beach — 640a5e554eb3752f629bd155
-- **Profile incomplete** — ask the user for: break type, energy window, wind tolerance, local quirks.
+### The Fort (The Old Port at Atlit) — 640a6699451905095aa61467
+- **Type**: Deep point break-like spot, Deeper than Sdot Yam
+- **Location notes**: North of an Old Roman Port, sheltered from southern winds
+- **Energy window**: 250–900 kJ
+- **Wind tolerance**: SSE to SSW up to 35–40 km/h is fine (sheltered). Other directions less tolerant.
+- **Swell**: Needs bigger swells to work. Small days won't produce here.
+- **Summary**: A power spot — needs energy but handles south winds well.
 
 ## Agent behavior
 
@@ -166,8 +143,8 @@ Example:
 Tool: mcp__nanoclaw__schedule_task
 Arguments:
   name: "morning-surf-report"
-  schedule: "0 6 * * *"
-  prompt: "Check surf conditions for my favorite spots using the surfline tool. Run surfline conditions for each of these spot IDs: 584204204e65fad6a7709aa7, 640a6699451905095aa61467, 640a665799dd44dd3d0c88df, 640a668b4519052578a61175, 584204204e65fad6a7709aa8, 584204204e65fad6a7709aaf. Cross-reference the data with each spot's profile from the surfline skill. Lead with the best-working spots and explain why. Keep it concise and actionable."
+  schedule: "0 5 * * *"
+  prompt: "Check surf conditions for my favorite spots using the surfline tool. Run surfline conditions for each of these spot IDs: 584204204e65fad6a7709aa7, 640a6699451905095aa61467. Cross-reference the data with each spot's profile from the surfline skill. Lead with the best-working spots and explain why. Keep it concise and actionable."
 ```
 
 **Modifying a report:**
