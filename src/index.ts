@@ -64,6 +64,24 @@ function loadState(): void {
   }
   sessions = getAllSessions();
   registeredGroups = getAllRegisteredGroups();
+
+  // Apply main-container-config.json to the main group if not already configured
+  for (const [jid, group] of Object.entries(registeredGroups)) {
+    if (group.folder === MAIN_GROUP_FOLDER && !group.containerConfig) {
+      const configPath = path.join(DATA_DIR, 'main-container-config.json');
+      try {
+        if (fs.existsSync(configPath)) {
+          const parsed = JSON.parse(fs.readFileSync(configPath, 'utf-8')) as ContainerConfig;
+          group.containerConfig = parsed;
+          setRegisteredGroup(jid, group);
+          logger.info({ configPath }, 'Applied main group container config from file');
+        }
+      } catch (err) {
+        logger.warn({ configPath, err }, 'Failed to load main container config');
+      }
+    }
+  }
+
   logger.info(
     { groupCount: Object.keys(registeredGroups).length },
     'State loaded',
