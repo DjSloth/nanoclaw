@@ -65,9 +65,9 @@ function loadState(): void {
   sessions = getAllSessions();
   registeredGroups = getAllRegisteredGroups();
 
-  // Apply main-container-config.json to the main group if not already configured
+  // Always sync main-container-config.json to the main group on startup
   for (const [jid, group] of Object.entries(registeredGroups)) {
-    if (group.folder === MAIN_GROUP_FOLDER && !group.containerConfig) {
+    if (group.folder === MAIN_GROUP_FOLDER) {
       const configPath = path.join(DATA_DIR, 'main-container-config.json');
       try {
         if (fs.existsSync(configPath)) {
@@ -108,9 +108,8 @@ function registerGroup(jid: string, group: RegisteredGroup): void {
     return;
   }
 
-  // For the main group, load container config from data/main-container-config.json
-  // if no containerConfig was provided during registration.
-  if (group.folder === MAIN_GROUP_FOLDER && !group.containerConfig) {
+  // For the main group, always sync container config from data/main-container-config.json
+  if (group.folder === MAIN_GROUP_FOLDER) {
     const configPath = path.join(DATA_DIR, 'main-container-config.json');
     try {
       if (fs.existsSync(configPath)) {
