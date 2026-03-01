@@ -22,7 +22,7 @@ All secrets are available as environment variables automatically — no sourcing
 | Project | Repo | GitHub Token | Supabase | Airtable |
 |---------|------|--------------|----------|----------|
 | WaveIQ | `slothlabs-ai/waveiq` | `GITHUB_PAT_SLOTHLABS` | `SUPABASE_URL_SLOTHLABS` / `SUPABASE_KEY_SLOTHLABS` | `AIRTABLE_PAT_SLOTHLABS` |
-| Invocap CRM | TBD | `GITHUB_PAT_INVOCAP` | `SUPABASE_URL_INVOCAP` / `SUPABASE_KEY_INVOCAP` | `AIRTABLE_PAT_INVOCAP` |
+| Invocap CRM | `invocap/invocap-crm` | `GITHUB_PAT_INVOCAP` | `SUPABASE_URL_INVOCAP` / `SUPABASE_KEY_INVOCAP` | `AIRTABLE_PAT_INVOCAP` |
 
 Update this table as projects are added.
 
