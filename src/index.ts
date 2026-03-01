@@ -3,6 +3,7 @@ import path from 'path';
 
 import {
   ASSISTANT_NAME,
+  DATA_DIR,
   IDLE_TIMEOUT,
   MAIN_GROUP_FOLDER,
   POLL_INTERVAL,
@@ -36,7 +37,7 @@ import { resolveGroupFolderPath } from './group-folder.js';
 import { startIpcWatcher } from './ipc.js';
 import { findChannel, formatMessages, formatOutbound } from './router.js';
 import { startSchedulerLoop } from './task-scheduler.js';
-import { Channel, NewMessage, RegisteredGroup } from './types.js';
+import { Channel, ContainerConfig, NewMessage, RegisteredGroup } from './types.js';
 import { logger } from './logger.js';
 
 // Re-export for backwards compatibility during refactor
@@ -87,6 +88,21 @@ function registerGroup(jid: string, group: RegisteredGroup): void {
       'Rejecting group registration with invalid folder',
     );
     return;
+  }
+
+  // For the main group, load container config from data/main-container-config.json
+  // if no containerConfig was provided during registration.
+  if (group.folder === MAIN_GROUP_FOLDER && !group.containerConfig) {
+    const configPath = path.join(DATA_DIR, 'main-container-config.json');
+    try {
+      if (fs.existsSync(configPath)) {
+        const parsed = JSON.parse(fs.readFileSync(configPath, 'utf-8')) as ContainerConfig;
+        group.containerConfig = parsed;
+        logger.info({ configPath }, 'Loaded main group container config from file');
+      }
+    } catch (err) {
+      logger.warn({ configPath, err }, 'Failed to load main container config');
+    }
   }
 
   registeredGroups[jid] = group;
