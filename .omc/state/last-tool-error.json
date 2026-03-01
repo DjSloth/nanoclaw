@@ -1,7 +1,0 @@
-{
-  "tool_name": "Bash",
-  "tool_input_preview": "{\"command\":\"git push\",\"description\":\"Push to remote\"}",
-  "error": "Exit code 128\nfatal: could not read Username for 'https://github.com': No such device or address\n\nfatal: could not read Username for 'https://github.com': No such device or address",
-  "timestamp": "2026-03-01T13:02:04.317Z",
-  "retry_count": 1
-}

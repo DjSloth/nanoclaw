@@ -1,5 +1,0 @@
-{"t":0,"agent":"system","event":"skill_invoked","skill_name":"hud"}
-{"t":0,"agent":"ae28d8a","agent_type":"unknown","event":"agent_stop","success":true}
-{"t":0,"agent":"system","event":"skill_invoked","skill_name":"mcp-setup"}
-{"t":0,"agent":"ac5c13a","agent_type":"unknown","event":"agent_stop","success":true}
-{"t":0,"agent":"a7e4a44","agent_type":"unknown","event":"agent_stop","success":true}
