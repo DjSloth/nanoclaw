@@ -1,3 +1,4 @@
+import { CronExpressionParser } from 'cron-parser';
 import fs from 'fs';
 import path from 'path';
 
@@ -7,6 +8,7 @@ import {
   IDLE_TIMEOUT,
   MAIN_GROUP_FOLDER,
   POLL_INTERVAL,
+  TIMEZONE,
   TRIGGER_PATTERN,
 } from './config.js';
 import { WhatsAppChannel } from './channels/whatsapp.js';
@@ -18,6 +20,7 @@ import {
 } from './container-runner.js';
 import { cleanupOrphans, ensureContainerRuntimeRunning } from './container-runtime.js';
 import {
+  createTask,
   getAllChats,
   getAllRegisteredGroups,
   getAllSessions,
@@ -25,12 +28,14 @@ import {
   getMessagesSince,
   getNewMessages,
   getRouterState,
+  getTaskById,
   initDatabase,
   setRegisteredGroup,
   setRouterState,
   setSession,
   storeChatMetadata,
   storeMessage,
+  updateTask,
 } from './db.js';
 import { GroupQueue } from './group-queue.js';
 import { resolveGroupFolderPath } from './group-folder.js';
@@ -453,11 +458,128 @@ function ensureContainerSystemRunning(): void {
   cleanupOrphans();
 }
 
+interface ScheduledTaskConfig {
+  name: string;
+  enabled?: boolean;
+  schedule_type: string;
+  schedule_value: string;
+  target_group_jid?: string;
+  context_mode?: string;
+  prompt: string;
+}
+
+/**
+ * Load scheduled tasks from each group's scheduled-tasks.json file.
+ * Uses stable IDs (config-{name}) so restarts don't create duplicates.
+ * Updates existing tasks if prompt or schedule has changed.
+ * Must be called after loadState() so registeredGroups is populated.
+ */
+function loadScheduledTasksConfig(): void {
+  for (const [jid, group] of Object.entries(registeredGroups)) {
+    let groupDir: string;
+    try {
+      groupDir = resolveGroupFolderPath(group.folder);
+    } catch {
+      continue;
+    }
+
+    const configPath = path.join(groupDir, 'scheduled-tasks.json');
+    if (!fs.existsSync(configPath)) continue;
+
+    let config: { tasks?: ScheduledTaskConfig[] };
+    try {
+      config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+    } catch (err) {
+      logger.warn({ configPath, err }, 'Failed to parse scheduled-tasks.json');
+      continue;
+    }
+
+    for (const task of config.tasks ?? []) {
+      if (!task.name) continue;
+      const taskId = `config-${task.name}`;
+      const targetJid = task.target_group_jid ?? jid;
+      const targetGroup = registeredGroups[targetJid];
+
+      if (!targetGroup) {
+        logger.warn(
+          { taskName: task.name, targetJid },
+          'scheduled-tasks.json: target group not registered, skipping',
+        );
+        continue;
+      }
+
+      if (task.enabled === false) {
+        const existing = getTaskById(taskId);
+        if (existing && existing.status === 'active') {
+          updateTask(taskId, { status: 'paused' });
+          logger.info({ taskId }, 'Config task disabled, pausing');
+        }
+        continue;
+      }
+
+      let nextRun: string | null = null;
+      if (task.schedule_type === 'cron') {
+        try {
+          const interval = CronExpressionParser.parse(task.schedule_value, { tz: TIMEZONE });
+          nextRun = interval.next().toISOString();
+        } catch {
+          logger.warn(
+            { taskName: task.name, scheduleValue: task.schedule_value },
+            'Invalid cron expression in scheduled-tasks.json, skipping',
+          );
+          continue;
+        }
+      } else if (task.schedule_type === 'interval') {
+        const ms = parseInt(task.schedule_value, 10);
+        if (isNaN(ms) || ms <= 0) {
+          logger.warn({ taskName: task.name }, 'Invalid interval in scheduled-tasks.json, skipping');
+          continue;
+        }
+        nextRun = new Date(Date.now() + ms).toISOString();
+      }
+
+      const contextMode = task.context_mode === 'group' ? 'group' : 'isolated';
+      const scheduleType = task.schedule_type as 'cron' | 'interval' | 'once';
+
+      const existing = getTaskById(taskId);
+      if (!existing) {
+        createTask({
+          id: taskId,
+          group_folder: targetGroup.folder,
+          chat_jid: targetJid,
+          prompt: task.prompt,
+          schedule_type: scheduleType,
+          schedule_value: task.schedule_value,
+          context_mode: contextMode,
+          next_run: nextRun,
+          status: 'active',
+          created_at: new Date().toISOString(),
+        });
+        logger.info({ taskId, taskName: task.name, targetFolder: targetGroup.folder }, 'Config task created');
+      } else if (
+        existing.prompt !== task.prompt ||
+        existing.schedule_value !== task.schedule_value ||
+        existing.schedule_type !== task.schedule_type
+      ) {
+        updateTask(taskId, {
+          prompt: task.prompt,
+          schedule_type: scheduleType,
+          schedule_value: task.schedule_value,
+          next_run: nextRun,
+          status: 'active',
+        });
+        logger.info({ taskId, taskName: task.name }, 'Config task updated');
+      }
+    }
+  }
+}
+
 async function main(): Promise<void> {
   ensureContainerSystemRunning();
   initDatabase();
   logger.info('Database initialized');
   loadState();
+  loadScheduledTasksConfig();
 
   // Graceful shutdown handlers
   const shutdown = async (signal: string) => {

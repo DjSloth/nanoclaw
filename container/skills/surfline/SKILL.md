@@ -69,36 +69,59 @@ These are the user's current favorite Surfline spots. When the user asks about "
 
 | Spot | ID |
 |------|----|
-| Sdot Yam | 584204204e65fad6a7709aa7 |
-| Atlit Beach | 640a6699451905095aa61467 |
-| Poleg Beach | 640a665799dd44dd3d0c88df |
+| The Power Plant (Sdot Yam) | 584204204e65fad6a7709aa7 |
+| The Fort (The Old Port at Atlit) | 640a6699451905095aa61467 |
+| The Sandbox (Poleg Beach) | 640a665799dd44dd3d0c88df |
+
+## Consistency scale
+
+Consistency % is a MAJOR factor — always report it:
+- **< 30%**: Rubbish — long waits between sets
+- **31–60%**: Meh — mediocre
+- **61–80%**: OK — decent session potential
+- **81–95%**: Good — consistent waves
+- **96–100%**: FIRE 🔥 — non-stop sets, epic session
+
+## Wind guidelines (Israel)
+
+- **Best**: No wind
+- **Manageable**: Light winds up to 6–8 km/h (any direction)
+- **Offshore (E)**: Clean waves, acceptable even when stronger
+- **Onshore (W)**: Messy — avoid if strong
+- Sheltered spots (Power Plant, Fort) handle specific wind directions that would ruin other spots
 
 ## Spot knowledge
 
-Use these profiles to assess whether a spot is working. Cross-reference live data (energy, wind, swell direction) against each profile to give informed recommendations.
+Use these profiles to assess whether a spot is working. Cross-reference live data (energy, wind, swell direction, consistency) against each profile.
 
 ### The Power Plant (Sdot Yam) — 584204204e65fad6a7709aa7
-- **Type**: Deep point break-like spot
-- **Location notes**: North of a power plant, sheltered from southern winds
-- **Energy window**: 150–900 kJ
-- **Wind tolerance**: SSE to SSW up to 35–40 km/h is fine (sheltered). Other directions less tolerant.
-- **Swell**: Needs bigger swells to work. Small days won't produce here.
-- **Summary**: A power spot — needs energy but handles south winds well.
+- **Type**: Beach break that acts like a point break — waves break off the marina pier
+- **Location**: Near power plant; marina to the south provides shelter
+- **Energy window**: 150–800 kJ. Deep water near the marina requires high energy to break properly. Below 150 kJ = flat.
+- **Wind tolerance**: Protected from S/SSW up to 35–40 km/h. Best with no wind or light offshore (E). Other directions are a major factor.
+- **Swell**: Needs bigger swells — small days won't produce
+- **Crowd factor**: PACKED on stormy S/SSW days — shelter attracts everyone, shortboarders and kooks everywhere. Consider crowds when recommending this spot on south wind days.
+- **Summary**: A power spot — needs energy but handles south winds well. Beware crowds on busy south days.
 
 ### The Sandbox (Poleg Beach) — 640a665799dd44dd3d0c88df
-- **Type**: Shallow beach break
-- **Energy window**: 50–250 kJ
-- **Wind tolerance**: Needs offshore wind (E/SE). Sensitive to onshore.
-- **Swell**: Works on smaller days. Gets messy when too big.
-- **Summary**: The small-day option — clean and fun when it's mellow.
+- **Actual location**: ~1.5–2km north of Poleg Beach proper
+- **Type**: Shallow beach/rocks break — sand on rocks creates consistent breaks
+- **Energy window**: 50–200 kJ sweet spot. Works even in ankle biters. Gets messy above 200 kJ.
+- **Wave types**:
+  - Wind swell (6–7s period): 50–200 kJ, up to chest-shoulder high
+  - Ground swell (10–12s+ period): shoulder to overhead, higher quality
+- **Break zones**: Small conditions = inside reef; firing = far reef (needs ground swell + high interval between sets)
+- **Wind tolerance**: Protected by 5–10m cliffs to the west. Best with no wind or light winds (up to 6–8 km/h). Offshore (E) protected on small days.
+- **Crowd factor**: VERY LOW — 6–7 min hike + rocky entry filters out kooks. Usually just The Balcony gang. Big advantage for catching waves.
+- **Summary**: The small-day option — clean, fun, and uncrowded.
 
-### The Fort (The Old Port at Atlit) — 640a6699451905095aa61467
-- **Type**: Deep point break-like spot, Deeper than Sdot Yam
-- **Location notes**: North of an Old Roman Port, sheltered from southern winds
+### The Fort (Atlit Old Port) — 640a6699451905095aa61467
+- **Type**: Deep point break-like spot, deeper than Sdot Yam
+- **Location**: Natural old Roman harbour; pier and fortress structures shelter from the south
 - **Energy window**: 250–900 kJ
-- **Wind tolerance**: SSE to SSW up to 35–40 km/h is fine (sheltered). Other directions less tolerant.
-- **Swell**: Needs bigger swells to work. Small days won't produce here.
-- **Summary**: A power spot — needs energy but handles south winds well.
+- **Wind tolerance**: Protected from S/SSW up to 35–40 km/h (ancient pier/fortress). Similar to The Power Plant.
+- **Swell**: Needs bigger swells — requires more energy than Sdot Yam
+- **Summary**: A power spot — handles south winds well but needs serious swell.
 
 ## Agent behavior
 
@@ -133,24 +156,34 @@ When you encounter a favorite spot with an incomplete profile (or a newly added 
 
 The user can ask you to set up recurring surf reports sent to any WhatsApp chat.
 
-**Creating a report:**
-- Use `mcp__nanoclaw__schedule_task` to create a scheduled task
-- If the user doesn't specify which chat, **ask them** — "Which WhatsApp chat should I send the report to?"
-- The prompt should instruct the agent to use spot profiles for smart analysis, not just dump raw numbers
+**Preferred approach — config file (persistent, version-controlled):**
 
-Example:
+Edit `/workspace/project/groups/main/scheduled-tasks.json` to add or modify tasks. Changes take effect on the next NanoClaw restart. This is the right approach for permanent recurring reports.
+
+Example entry:
+```json
+{
+  "name": "dawn-patrol-surf-report",
+  "enabled": true,
+  "schedule_type": "cron",
+  "schedule_value": "0 5 * * *",
+  "target_group_jid": "<group JID>",
+  "context_mode": "group",
+  "prompt": "Dawn patrol surf check. Run conditions for The Power Plant and The Sandbox. Give a go/no-go recommendation — which spot (if any) is worth surfing right now, and why. Include water temp. Keep it short and actionable.",
+  "description": "Daily 5am surf report"
+}
 ```
-Tool: mcp__nanoclaw__schedule_task
-Arguments:
-  name: "morning-surf-report"
-  schedule: "0 5 * * *"
-  prompt: "Check surf conditions for my favorite spots using the surfline tool. Run surfline conditions for each of these spot IDs: 584204204e65fad6a7709aa7, 640a6699451905095aa61467. Cross-reference the data with each spot's profile from the surfline skill. Lead with the best-working spots and explain why. Keep it concise and actionable."
-```
+
+Keep prompts short — the skill has all the spot knowledge and analysis logic built in.
+
+**Alternative — native scheduling tools (ephemeral, takes effect immediately):**
+
+Use `mcp__nanoclaw__schedule_task` for one-off or temporary tasks. These are stored in the DB and survive restarts, but aren't tracked in the config file. Avoid using this for reports that are already defined in `scheduled-tasks.json` — it will create duplicates.
 
 **Modifying a report:**
-- Use `mcp__nanoclaw__list_tasks` to find existing tasks, then `mcp__nanoclaw__update_task` to modify schedule, spots, or prompt
+- Config file tasks: edit `scheduled-tasks.json` and restart NanoClaw
+- Native tasks: use `mcp__nanoclaw__list_tasks` then `mcp__nanoclaw__update_task`
 
 **Removing a report:**
-- Use `mcp__nanoclaw__delete_task` with the task name or ID
-
-Adjust the cron schedule, spot list, and target chat based on the user's preferences.
+- Config file tasks: set `"enabled": false` or remove the entry, then restart
+- Native tasks: use `mcp__nanoclaw__delete_task`
