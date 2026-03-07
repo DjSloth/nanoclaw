@@ -14,7 +14,8 @@ Commands:
   region <name> [limit]       Discover subregions and spots by country/region name
   details <spotId>            Full spot profile: break type, crowd, best conditions, etc.
   travel <slug-or-id>          Travel zone guide: seasons, spots, tips
-  travel-search <query>        Search travel zones by name (returns slugs/IDs for travel command)
+  travel-search <query>        Search travel zones by name (uses local cache if available)
+  travel-scan                  Fetch all travel zones from Surfline and update local cache CSV
   favorites                   List favorite spots
 EOF
   exit 1
@@ -388,8 +389,40 @@ cmd_travel() {
   fi
 }
 
+_SKILL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+_TRAVEL_CSV="${_SKILL_DIR}/travel-zones.csv"
+
 cmd_travel_search() {
   local query="${1:?Usage: surfline travel-search <query>}"
+
+  # Use local CSV cache if available
+  if [ -f "$_TRAVEL_CSV" ]; then
+    local results
+    results=$(grep -i "$query" "$_TRAVEL_CSV" | grep -v '^name,')
+    if [ -n "$results" ]; then
+      echo "Travel zones matching: ${query} (cached)"
+      echo "---"
+      # Parse CSV and format output: name,slug,zone_id,region,url,high,shoulder,low
+      echo "$results" | while IFS=',' read -r name slug zone_id region url high shoulder low; do
+        # Strip surrounding quotes from csv fields
+        name=$(echo "$name" | tr -d '"')
+        slug=$(echo "$slug" | tr -d '"')
+        zone_id=$(echo "$zone_id" | tr -d '"')
+        region=$(echo "$region" | tr -d '"')
+        high=$(echo "$high" | tr -d '"')
+        shoulder=$(echo "$shoulder" | tr -d '"')
+        low=$(echo "$low" | tr -d '"')
+        echo "  ${name}  [${region}]"
+        echo "    slug: ${slug}  ID: ${zone_id}"
+        echo "    High: ${high}  |  Shoulder: ${shoulder}  |  Low: ${low}"
+      done
+      return 0
+    fi
+    echo "No travel zones found for: ${query} (in cache — run 'surfline travel-scan' to refresh)"
+    return 0
+  fi
+
+  # Fallback: live Contentful search
   local encoded
   encoded=$(printf '%s' "$query" | jq -sRr @uri)
   local url="${_CF_BASE}/entries?access_token=${_CF_TOKEN}&content_type=travelZone&query=${encoded}&select=sys.id,fields.title,fields.slug,fields.travelRegion&include=1&locale=en-US"
@@ -400,10 +433,10 @@ cmd_travel_search() {
   local total
   total=$(echo "$raw" | jq '.total // 0')
   if [ "$total" = "0" ]; then
-    echo "No travel zones found for: ${query}"; exit 0
+    echo "No travel zones found for: ${query}"; return 0
   fi
 
-  echo "Travel zones matching: ${query}"
+  echo "Travel zones matching: ${query} (live)"
   echo "---"
   echo "$raw" | jq -r '
     . as $root |
@@ -412,6 +445,48 @@ cmd_travel_search() {
     (.fields.travelRegion.sys.id // "") as $rid |
     "  \(.fields.title)  slug: \(.fields.slug)  ID: \(.sys.id)" + (if $rid != "" then "  [\($regions[$rid] // "")]" else "" end)
   '
+}
+
+cmd_travel_scan() {
+  echo "Scanning Surfline travel zones from Contentful..."
+
+  local tmp
+  tmp=$(mktemp)
+  echo '"name","slug","zone_id","region","url","high_season","shoulder_season","low_season"' > "$tmp"
+
+  local skip=0 limit=100 total=9999 fetched=0
+
+  while [ "$fetched" -lt "$total" ]; do
+    local page_url="${_CF_BASE}/entries?access_token=${_CF_TOKEN}&content_type=travelZone&include=1&limit=${limit}&skip=${skip}&select=sys.id,fields.title,fields.slug,fields.travelRegion,fields.whenToScore&locale=en-US"
+    local raw
+    raw=$(curl -sf --max-time 20 "$page_url") || { echo "Error: fetch failed at skip=${skip}"; rm -f "$tmp"; exit 1; }
+
+    total=$(echo "$raw" | jq '.total')
+    local page_count
+    page_count=$(echo "$raw" | jq '.items | length')
+
+    echo "$raw" | jq -r '
+      . as $root |
+      ((.includes.Entry // []) | map({key: .sys.id, value: .fields}) | from_entries) as $idx |
+      $root.items[] |
+      .sys.id as $zid |
+      .fields as $f |
+      ($idx[$f.travelRegion.sys.id // ""].title // "") as $region |
+      ($idx[$f.whenToScore.sys.id // ""] // {}) as $wts |
+      [$f.title, $f.slug, $zid, $region,
+       ("https://www.surfline.com/travel/zones/" + $f.slug + "/" + $zid),
+       ($wts.highSeasonMonths // ""),
+       ($wts.shoulderSeasonMonths // ""),
+       ($wts.lowSeasonMonths // "")] | @csv
+    ' >> "$tmp"
+
+    fetched=$((fetched + page_count))
+    skip=$((skip + limit))
+    [ "$page_count" -lt "$limit" ] && break
+  done
+
+  mv "$tmp" "$_TRAVEL_CSV"
+  echo "Done: ${fetched} zones → ${_TRAVEL_CSV}"
 }
 
 cmd_favorites() {
@@ -449,6 +524,7 @@ case "$command" in
   details)    cmd_details "$@" ;;
   travel)         cmd_travel "$@" ;;
   travel-search)  cmd_travel_search "$@" ;;
+  travel-scan)    cmd_travel_scan ;;
   favorites)      cmd_favorites ;;
   *)          usage ;;
 esac
