@@ -13,6 +13,8 @@ Commands:
   search <query>              Find spot IDs by name
   region <name> [limit]       Discover subregions and spots by country/region name
   details <spotId>            Full spot profile: break type, crowd, best conditions, etc.
+  travel <slug-or-id>          Travel zone guide: seasons, spots, tips
+  travel-search <query>        Search travel zones by name (returns slugs/IDs for travel command)
   favorites                   List favorite spots
 EOF
   exit 1
@@ -269,6 +271,149 @@ EOF
   fi
 }
 
+_CF_SPACE="4h67cva1xuos"
+_CF_TOKEN="Kwz6JhBjIOY0-0K1qWRN6ZsCg-ZaNvy-7I31ciSmnAU"
+_CF_BASE="https://cdn.contentful.com/spaces/${_CF_SPACE}"
+
+# Extract plain text from a Contentful rich text JSON blob
+_richtext_plain() {
+  echo "$1" | jq -r '[.. | objects | select(.nodeType == "text") | .value] | join(" ")' 2>/dev/null
+}
+
+cmd_travel() {
+  local arg="${1:?Usage: surfline travel <slug-or-id>}"
+
+  # Detect if arg is a Contentful entry ID (22 alphanumeric chars) or a slug
+  local fetch_url
+  if echo "$arg" | grep -qE '^[A-Za-z0-9]{20,25}$'; then
+    fetch_url="${_CF_BASE}/entries?access_token=${_CF_TOKEN}&sys.id=${arg}&include=2&locale=en-US"
+  else
+    fetch_url="${_CF_BASE}/entries?access_token=${_CF_TOKEN}&content_type=travelZone&fields.slug=${arg}&include=2&locale=en-US"
+  fi
+
+  local raw
+  raw=$(curl -sf --max-time 15 "$fetch_url") || { echo "Error: Contentful request failed"; exit 1; }
+
+  local total
+  total=$(echo "$raw" | jq '.total // 0')
+  if [ "$total" = "0" ]; then
+    echo "Error: no travel zone found for '${arg}'"
+    echo "Tip: use 'surfline travel-search <query>' to find zone slugs"
+    exit 1
+  fi
+
+  # Build index of includes
+  local idx
+  idx=$(echo "$raw" | jq '(.includes.Entry // []) | map({key: .sys.id, value: .fields}) | from_entries')
+
+  local zf  # zone fields
+  zf=$(echo "$raw" | jq '.items[0].fields')
+
+  local title region
+  title=$(echo "$zf" | jq -r '.title // "Unknown"')
+  region_id=$(echo "$zf" | jq -r '.travelRegion.sys.id // ""')
+  region=$(echo "$idx" | jq -r --arg id "$region_id" '.[$id].title // ""')
+
+  # Spots
+  local spots
+  spots=$(echo "$raw" | jq -r --argjson idx "$idx" '
+    .items[0].fields.surfSpots[].sys.id as $id |
+    $idx[$id] |
+    "  \(.title)  \(.spotId)"
+  ' 2>/dev/null)
+
+  # whenToScore linked entry
+  local wts_id wts
+  wts_id=$(echo "$zf" | jq -r '.whenToScore.sys.id // ""')
+  wts=$(echo "$idx" | jq --arg id "$wts_id" '.[$id]')
+
+  local high_months high_ability high_crowd high_desc
+  local shoulder_months shoulder_ability shoulder_crowd shoulder_desc
+  local low_months low_ability low_crowd low_desc
+  high_months=$(echo "$wts"    | jq -r '.highSeasonMonths // "Unknown"')
+  high_ability=$(echo "$wts"   | jq -r '.highSeasonAbility // "Unknown"')
+  high_crowd=$(echo "$wts"     | jq -r '.highSeasonCrowd // "Unknown"')
+  high_desc=$(_richtext_plain "$(echo "$wts" | jq -c '.highSeasonDescription // {}')")
+  shoulder_months=$(echo "$wts"  | jq -r '.shoulderSeasonMonths // "Unknown"')
+  shoulder_ability=$(echo "$wts" | jq -r '.shoulderSeasonAbility // "Unknown"')
+  shoulder_crowd=$(echo "$wts"   | jq -r '.shoulderSeasonCrowd // "Unknown"')
+  shoulder_desc=$(_richtext_plain "$(echo "$wts" | jq -c '.shoulderSeasonDescription // {}')")
+  low_months=$(echo "$wts"   | jq -r '.lowSeasonMonths // "Unknown"')
+  low_ability=$(echo "$wts"  | jq -r '.lowSeasonAbility // "Unknown"')
+  low_crowd=$(echo "$wts"    | jq -r '.lowSeasonCrowd // "Unknown"')
+  low_desc=$(_richtext_plain "$(echo "$wts" | jq -c '.lowSeasonDescription // {}')")
+
+  # quickTips linked entry
+  local qt_id qt
+  qt_id=$(echo "$zf" | jq -r '.quickTips.sys.id // ""')
+  qt=$(echo "$idx" | jq --arg id "$qt_id" '.[$id]')
+
+  local travel_times currency visa connectivity water hazards cash avg_cost
+  travel_times=$(echo "$qt" | jq -r '.travelTimes // ""')
+  currency=$(echo "$qt"     | jq -r '.currency // ""')
+  visa=$(echo "$qt"         | jq -r '.visaRequirements // ""')
+  connectivity=$(echo "$qt" | jq -r '.connectivity // ""')
+  water=$(echo "$qt"        | jq -r '.drinkingWaterQuality // ""')
+  hazards=$(echo "$qt"      | jq -r '.hazards // ""')
+  cash=$(echo "$qt"         | jq -r '.cashCardCrypto // ""')
+  avg_cost=$(echo "$qt"     | jq -r '.averageCost // ""')
+
+  # Print
+  echo "${title}$([ -n "$region" ] && echo "  [${region}]")"
+  echo ""
+  echo "Spots in this zone:"
+  echo "$spots"
+  echo ""
+  echo "When to score:"
+  echo "  High season: ${high_months}  |  Ability: ${high_ability}  |  Crowd: ${high_crowd}"
+  [ -n "$high_desc" ] && printf "%s\n" "$high_desc" | fold -s -w 76 | sed 's/^/    /'
+  echo ""
+  echo "  Shoulder: ${shoulder_months}  |  Ability: ${shoulder_ability}  |  Crowd: ${shoulder_crowd}"
+  [ -n "$shoulder_desc" ] && printf "%s\n" "$shoulder_desc" | fold -s -w 76 | sed 's/^/    /'
+  echo ""
+  echo "  Low season: ${low_months}  |  Ability: ${low_ability}  |  Crowd: ${low_crowd}"
+  [ -n "$low_desc" ] && printf "%s\n" "$low_desc" | fold -s -w 76 | sed 's/^/    /'
+  echo ""
+  echo "Quick tips:"
+  [ -n "$travel_times" ]  && printf "  Travel times: %s\n" "$(echo "$travel_times" | tr '\n' '  ')"
+  [ -n "$currency" ]      && echo "  Currency: ${currency}"
+  [ -n "$visa" ]          && echo "  Visa: ${visa}"
+  [ -n "$connectivity" ]  && echo "  Connectivity: ${connectivity}"
+  [ -n "$water" ]         && echo "  Water: $(echo "$water" | tr '\n' ' ')"
+  [ -n "$cash" ]          && echo "  Cash/card: ${cash}"
+  [ -n "$hazards" ]       && echo "  Hazards: ${hazards}"
+  if [ -n "$avg_cost" ]; then
+    echo "  Average costs:"
+    printf "%s\n" "$avg_cost" | grep -v '^$' | sed 's/^/    /'
+  fi
+}
+
+cmd_travel_search() {
+  local query="${1:?Usage: surfline travel-search <query>}"
+  local encoded
+  encoded=$(printf '%s' "$query" | jq -sRr @uri)
+  local url="${_CF_BASE}/entries?access_token=${_CF_TOKEN}&content_type=travelZone&query=${encoded}&select=sys.id,fields.title,fields.slug,fields.travelRegion&include=1&locale=en-US"
+
+  local raw
+  raw=$(curl -sf --max-time 15 "$url") || { echo "Error: search failed"; exit 1; }
+
+  local total
+  total=$(echo "$raw" | jq '.total // 0')
+  if [ "$total" = "0" ]; then
+    echo "No travel zones found for: ${query}"; exit 0
+  fi
+
+  echo "Travel zones matching: ${query}"
+  echo "---"
+  echo "$raw" | jq -r '
+    . as $root |
+    ((.includes.Entry // []) | map({key: .sys.id, value: .fields.title}) | from_entries) as $regions |
+    $root.items[] |
+    (.fields.travelRegion.sys.id // "") as $rid |
+    "  \(.fields.title)  slug: \(.fields.slug)  ID: \(.sys.id)" + (if $rid != "" then "  [\($regions[$rid] // "")]" else "" end)
+  '
+}
+
 cmd_favorites() {
   cat <<'EOF'
 Favorite spots:
@@ -302,6 +447,8 @@ case "$command" in
   search)     cmd_search "$@" ;;
   region)     cmd_region "$@" ;;
   details)    cmd_details "$@" ;;
-  favorites)  cmd_favorites ;;
+  travel)         cmd_travel "$@" ;;
+  travel-search)  cmd_travel_search "$@" ;;
+  favorites)      cmd_favorites ;;
   *)          usage ;;
 esac
