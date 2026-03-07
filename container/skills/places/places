@@ -1,0 +1,317 @@
+#!/usr/bin/env bash
+set -uo pipefail
+
+GOOGLE_PLACES_BASE="https://maps.googleapis.com/maps/api/place"
+SERPAPI_BASE="https://serpapi.com/search.json"
+
+usage() {
+  cat <<'EOF'
+Usage: places <command> [args]
+
+Commands:
+  search <query> [options]    Search for local businesses
+  details <place_id>          Get full details for a place
+
+Options (for search):
+  --location <city/address>   Location to search near
+  --near <lat,lng>            Coordinates (alternative to --location)
+  --radius <km>               Search radius in km (default: 5)
+  --rating <n+>               Minimum rating (e.g. 4+)
+  --price <level>             Price level 1-4 or range (e.g. 2-3)
+  --open-now                  Only show currently open places
+  --limit <n>                 Max results (default: 10)
+  --type <type>               Business type (restaurant, cafe, bar, hotel)
+
+Examples:
+  places search "sushi" --location "Binyamina, Israel" --rating 4+
+  places search "bars" --near 32.5234,34.9415 --radius 3 --open-now
+  places details ChIJ...
+EOF
+  exit 1
+}
+
+price_display() {
+  case "$1" in
+    1) echo "$" ;;
+    2) echo "$$" ;;
+    3) echo "$$$" ;;
+    4) echo "$$$$" ;;
+    *) echo "" ;;
+  esac
+}
+
+# Search via Google Places API
+# Returns 0 on success, 1 on quota exceeded (caller should fall back)
+cmd_search_google() {
+  local query="$1" location="$2" near="$3" radius_km="$4"
+  local min_rating="$5" price_filter="$6" open_now="$7" limit="$8" type_filter="$9"
+
+  local radius_m
+  radius_m=$(echo "$radius_km" | awk '{printf "%d", $1 * 1000}')
+
+  local encoded_query
+  encoded_query=$(printf '%s' "$query" | jq -sRr @uri)
+
+  local url
+  if [ -n "$near" ]; then
+    local lat lon
+    lat=$(echo "$near" | cut -d',' -f1)
+    lon=$(echo "$near" | cut -d',' -f2)
+    url="${GOOGLE_PLACES_BASE}/nearbysearch/json?location=${lat},${lon}&radius=${radius_m}&keyword=${encoded_query}&key=${GOOGLE_PLACES_API_KEY}"
+    [ -n "$type_filter" ] && url="${url}&type=${type_filter}"
+    [ "$open_now" = "1" ] && url="${url}&opennow=true"
+  else
+    local search_query="$query"
+    [ -n "$location" ] && search_query="$query in $location"
+    local encoded_full
+    encoded_full=$(printf '%s' "$search_query" | jq -sRr @uri)
+    url="${GOOGLE_PLACES_BASE}/textsearch/json?query=${encoded_full}&radius=${radius_m}&key=${GOOGLE_PLACES_API_KEY}"
+    [ -n "$type_filter" ] && url="${url}&type=${type_filter}"
+    [ "$open_now" = "1" ] && url="${url}&opennow=true"
+  fi
+
+  local json
+  json=$(curl -sf --max-time 15 "$url") || { echo "Error: failed to reach Google Places API"; exit 1; }
+
+  local status
+  status=$(echo "$json" | jq -r '.status')
+
+  case "$status" in
+    OK) ;;
+    ZERO_RESULTS) echo "No results found for: $query"; exit 0 ;;
+    OVER_QUERY_LIMIT) return 1 ;;
+    REQUEST_DENIED|INVALID_REQUEST)
+      echo "Error: $(echo "$json" | jq -r '.error_message // "API error"')"
+      exit 1 ;;
+    *) echo "Error: Google Places API returned $status"; exit 1 ;;
+  esac
+
+  local count=0
+  while IFS= read -r result; do
+    [ "$count" -ge "$limit" ] && break
+
+    local name rating total_ratings price_level address open place_id lat lng
+    name=$(echo "$result" | jq -r '.name // "Unknown"')
+    rating=$(echo "$result" | jq -r '.rating // empty')
+    total_ratings=$(echo "$result" | jq -r '.user_ratings_total // empty')
+    price_level=$(echo "$result" | jq -r '.price_level // empty')
+    address=$(echo "$result" | jq -r '.formatted_address // .vicinity // ""')
+    open=$(echo "$result" | jq -r '.opening_hours.open_now // empty')
+    place_id=$(echo "$result" | jq -r '.place_id // ""')
+    lat=$(echo "$result" | jq -r '.geometry.location.lat // ""')
+    lng=$(echo "$result" | jq -r '.geometry.location.lng // ""')
+
+    # Filter by minimum rating
+    if [ -n "$min_rating" ] && [ -n "$rating" ]; then
+      local threshold
+      threshold=$(echo "$min_rating" | tr -d '+')
+      if echo "$rating $threshold" | awk '{exit ($1 >= $2)}'; then
+        continue
+      fi
+    fi
+
+    # Filter by price level
+    if [ -n "$price_filter" ] && [ -n "$price_level" ]; then
+      if echo "$price_filter" | grep -q '-'; then
+        local pmin pmax
+        pmin=$(echo "$price_filter" | cut -d'-' -f1)
+        pmax=$(echo "$price_filter" | cut -d'-' -f2)
+        if echo "$price_level $pmin $pmax" | awk '{exit ($1 >= $2 && $1 <= $3)}'; then
+          continue
+        fi
+      else
+        [ "$price_level" != "$price_filter" ] && continue
+      fi
+    fi
+
+    # Build rating/price string
+    local rating_str=""
+    if [ -n "$rating" ]; then
+      rating_str="⭐ $rating"
+      [ -n "$total_ratings" ] && rating_str="$rating_str ($total_ratings reviews)"
+    fi
+    local price_str
+    price_str=$(price_display "$price_level")
+    [ -n "$price_str" ] && rating_str="${rating_str:+$rating_str • }$price_str"
+
+    local hours_str=""
+    [ "$open" = "true" ] && hours_str="Open now"
+    [ "$open" = "false" ] && hours_str="Closed"
+
+    local maps_url=""
+    [ -n "$lat" ] && [ -n "$lng" ] && maps_url="https://www.google.com/maps/search/?api=1&query=${lat},${lng}&query_place_id=${place_id}"
+
+    echo "📍 $name"
+    [ -n "$rating_str" ] && echo "   $rating_str"
+    [ -n "$address" ] && echo "   $address"
+    [ -n "$hours_str" ] && echo "   🕐 $hours_str"
+    [ -n "$place_id" ] && echo "   ID: $place_id"
+    [ -n "$maps_url" ] && echo "   🗺  $maps_url"
+    echo ""
+
+    count=$((count + 1))
+  done < <(echo "$json" | jq -c '.results[]? // empty')
+
+  [ "$count" -eq 0 ] && echo "No results matched the filters."
+  return 0
+}
+
+# Search via SerpAPI (fallback)
+cmd_search_serpapi() {
+  local query="$1" location="$2" limit="$3"
+
+  local params
+  params="engine=google_local&q=$(printf '%s' "$query" | jq -sRr @uri)&api_key=${SERPAPI_KEY}"
+  [ -n "$location" ] && params="${params}&location=$(printf '%s' "$location" | jq -sRr @uri)"
+
+  local json
+  json=$(curl -sf --max-time 15 "${SERPAPI_BASE}?${params}") || { echo "Error: SerpAPI request failed"; exit 1; }
+
+  local error
+  error=$(echo "$json" | jq -r '.error // empty')
+  [ -n "$error" ] && { echo "Error: $error"; exit 1; }
+
+  local count=0
+  while IFS= read -r result; do
+    [ "$count" -ge "$limit" ] && break
+
+    local title rating reviews price address hours
+    title=$(echo "$result" | jq -r '.title // "Unknown"')
+    rating=$(echo "$result" | jq -r '.rating // empty')
+    reviews=$(echo "$result" | jq -r '.reviews // empty')
+    price=$(echo "$result" | jq -r '.price // empty')
+    address=$(echo "$result" | jq -r '.address // ""')
+    hours=$(echo "$result" | jq -r '.hours // ""')
+
+    local rating_str=""
+    [ -n "$rating" ] && rating_str="⭐ $rating"
+    [ -n "$reviews" ] && rating_str="$rating_str ($reviews reviews)"
+    [ -n "$price" ] && rating_str="${rating_str:+$rating_str • }$price"
+
+    echo "📍 $title"
+    [ -n "$rating_str" ] && echo "   $rating_str"
+    [ -n "$address" ] && echo "   $address"
+    [ -n "$hours" ] && echo "   🕐 $hours"
+    echo ""
+
+    count=$((count + 1))
+  done < <(echo "$json" | jq -c '.local_results[]? // empty')
+
+  [ "$count" -eq 0 ] && echo "No results found for: $query"
+}
+
+cmd_search() {
+  local query="${1:?Usage: places search <query> [options]}"
+  shift
+
+  local location="" near="" radius="5" min_rating="" price="" open_now="0" limit="10" type_filter=""
+
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --location) location="$2"; shift 2 ;;
+      --near)     near="$2";     shift 2 ;;
+      --radius)   radius="${2%km}"; shift 2 ;;
+      --rating)   min_rating="$2"; shift 2 ;;
+      --price)    price="$2";    shift 2 ;;
+      --open-now) open_now="1";  shift ;;
+      --limit)    limit="$2";    shift 2 ;;
+      --type)     type_filter="$2"; shift 2 ;;
+      *) echo "Unknown option: $1"; usage ;;
+    esac
+  done
+
+  if [ -n "${GOOGLE_PLACES_API_KEY:-}" ]; then
+    if cmd_search_google "$query" "$location" "$near" "$radius" "$min_rating" "$price" "$open_now" "$limit" "$type_filter"; then
+      return 0
+    fi
+    # Quota exceeded — fall through to SerpAPI
+    echo "(Google Places quota exceeded, trying SerpAPI...)"
+  fi
+
+  if [ -n "${SERPAPI_KEY:-}" ]; then
+    cmd_search_serpapi "$query" "$location" "$limit"
+    return 0
+  fi
+
+  echo "Error: SERP skill not configured. Add GOOGLE_PLACES_API_KEY to .env"
+  exit 1
+}
+
+cmd_details() {
+  local place_id="${1:?Usage: places details <place_id>}"
+
+  if [ -z "${GOOGLE_PLACES_API_KEY:-}" ]; then
+    echo "Error: SERP skill not configured. Add GOOGLE_PLACES_API_KEY to .env"
+    exit 1
+  fi
+
+  local fields="name,rating,user_ratings_total,price_level,formatted_address,formatted_phone_number,website,opening_hours,geometry,url,reviews"
+  local url="${GOOGLE_PLACES_BASE}/details/json?place_id=${place_id}&fields=${fields}&key=${GOOGLE_PLACES_API_KEY}"
+
+  local json
+  json=$(curl -sf --max-time 15 "$url") || { echo "Error: failed to fetch place details"; exit 1; }
+
+  local status
+  status=$(echo "$json" | jq -r '.status')
+  [ "$status" != "OK" ] && { echo "Error: $(echo "$json" | jq -r '.error_message // "Place not found"')"; exit 1; }
+
+  local r
+  r=$(echo "$json" | jq -r '.result')
+
+  local name rating total_ratings price_level address phone website maps_url
+  name=$(echo "$r" | jq -r '.name // "Unknown"')
+  rating=$(echo "$r" | jq -r '.rating // empty')
+  total_ratings=$(echo "$r" | jq -r '.user_ratings_total // empty')
+  price_level=$(echo "$r" | jq -r '.price_level // empty')
+  address=$(echo "$r" | jq -r '.formatted_address // ""')
+  phone=$(echo "$r" | jq -r '.formatted_phone_number // ""')
+  website=$(echo "$r" | jq -r '.website // ""')
+  maps_url=$(echo "$r" | jq -r '.url // ""')
+
+  echo "📍 $name"
+
+  local rating_str=""
+  if [ -n "$rating" ]; then
+    rating_str="⭐ $rating/5"
+    [ -n "$total_ratings" ] && rating_str="$rating_str ($total_ratings reviews)"
+    local price_str
+    price_str=$(price_display "$price_level")
+    [ -n "$price_str" ] && rating_str="$rating_str • $price_str"
+    echo "   $rating_str"
+  fi
+
+  [ -n "$address" ] && echo "   📌 $address"
+  [ -n "$phone" ]   && echo "   📞 $phone"
+  [ -n "$website" ] && echo "   🌐 $website"
+
+  local open_now
+  open_now=$(echo "$r" | jq -r '.opening_hours.open_now // empty')
+  [ "$open_now" = "true" ]  && echo "   🕐 Open now"
+  [ "$open_now" = "false" ] && echo "   🕐 Closed"
+
+  local weekday_text
+  weekday_text=$(echo "$r" | jq -r '(.opening_hours.weekday_text // []) | join(" | ")' 2>/dev/null)
+  [ -n "$weekday_text" ] && echo "   Hours: $weekday_text"
+
+  [ -n "$maps_url" ] && echo "   🗺  $maps_url"
+
+  local review_count
+  review_count=$(echo "$r" | jq '.reviews // [] | length')
+  if [ "${review_count:-0}" -gt 0 ]; then
+    echo ""
+    echo "   Reviews:"
+    echo "$r" | jq -r '.reviews[:3][] | "   ⭐ \(.rating)/5 — \(.text | split("\n")[0] | .[0:120])"' 2>/dev/null || true
+  fi
+}
+
+# --- Main ---
+
+command="${1:-}"
+[ -z "$command" ] && usage
+shift
+
+case "$command" in
+  search)  cmd_search "$@" ;;
+  details) cmd_details "$@" ;;
+  *)       usage ;;
+esac
