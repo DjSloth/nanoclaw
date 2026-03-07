@@ -268,7 +268,13 @@ EOF
   if [ -n "$description" ]; then
     echo ""
     echo "  [Overview]"
-    echo "  ${description}"
+    # Convert <br> to newlines, strip remaining tags, decode entities
+    printf "%s\n" "$description" \
+      | sed 's/<\/\?br[^>]*>/\n/g' \
+      | sed 's/<[^>]*>//g' \
+      | sed 's/&amp;/\&/g; s/&lt;/</g; s/&gt;/>/g; s/&nbsp;/ /g' \
+      | sed '/^[[:space:]]*$/d' \
+      | sed 's/^/  /'
   fi
 }
 
