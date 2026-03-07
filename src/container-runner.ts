@@ -206,8 +206,8 @@ function readSecrets(): Record<string, string> {
     'SUPABASE_KEY_INVOCAP',
     'AIRTABLE_PAT_SLOTHLABS',
     'AIRTABLE_PAT_INVOCAP',
-    'GOOGLE_PLACES_API_KEY',
-    'SERPAPI_KEY',
+    'GOOGLE_MAPS_API_KEY',
+    'SERP_API_KEY',
   ]);
 }
 

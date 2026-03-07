@@ -46,8 +46,8 @@ Returns full info: address, phone, website, hours, top reviews.
 Requires at least one API key in `.env`:
 
 ```bash
-GOOGLE_PLACES_API_KEY=AIza...   # Primary (recommended)
-SERPAPI_KEY=abc123...           # Fallback if Google quota exceeded
+GOOGLE_MAPS_API_KEY=AIza...   # Primary (recommended)
+SERP_API_KEY=abc123...           # Fallback if Google quota exceeded
 ```
 
 ## Examples

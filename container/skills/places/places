@@ -57,7 +57,7 @@ cmd_search_google() {
     local lat lon
     lat=$(echo "$near" | cut -d',' -f1)
     lon=$(echo "$near" | cut -d',' -f2)
-    url="${GOOGLE_PLACES_BASE}/nearbysearch/json?location=${lat},${lon}&radius=${radius_m}&keyword=${encoded_query}&key=${GOOGLE_PLACES_API_KEY}"
+    url="${GOOGLE_PLACES_BASE}/nearbysearch/json?location=${lat},${lon}&radius=${radius_m}&keyword=${encoded_query}&key=${GOOGLE_MAPS_API_KEY}"
     [ -n "$type_filter" ] && url="${url}&type=${type_filter}"
     [ "$open_now" = "1" ] && url="${url}&opennow=true"
   else
@@ -65,7 +65,7 @@ cmd_search_google() {
     [ -n "$location" ] && search_query="$query in $location"
     local encoded_full
     encoded_full=$(printf '%s' "$search_query" | jq -sRr @uri)
-    url="${GOOGLE_PLACES_BASE}/textsearch/json?query=${encoded_full}&radius=${radius_m}&key=${GOOGLE_PLACES_API_KEY}"
+    url="${GOOGLE_PLACES_BASE}/textsearch/json?query=${encoded_full}&radius=${radius_m}&key=${GOOGLE_MAPS_API_KEY}"
     [ -n "$type_filter" ] && url="${url}&type=${type_filter}"
     [ "$open_now" = "1" ] && url="${url}&opennow=true"
   fi
@@ -161,7 +161,7 @@ cmd_search_serpapi() {
   local query="$1" location="$2" limit="$3"
 
   local params
-  params="engine=google_local&q=$(printf '%s' "$query" | jq -sRr @uri)&api_key=${SERPAPI_KEY}"
+  params="engine=google_local&q=$(printf '%s' "$query" | jq -sRr @uri)&api_key=${SERP_API_KEY}"
   [ -n "$location" ] && params="${params}&location=$(printf '%s' "$location" | jq -sRr @uri)"
 
   local json
@@ -220,7 +220,7 @@ cmd_search() {
     esac
   done
 
-  if [ -n "${GOOGLE_PLACES_API_KEY:-}" ]; then
+  if [ -n "${GOOGLE_MAPS_API_KEY:-}" ]; then
     if cmd_search_google "$query" "$location" "$near" "$radius" "$min_rating" "$price" "$open_now" "$limit" "$type_filter"; then
       return 0
     fi
@@ -228,25 +228,25 @@ cmd_search() {
     echo "(Google Places quota exceeded, trying SerpAPI...)"
   fi
 
-  if [ -n "${SERPAPI_KEY:-}" ]; then
+  if [ -n "${SERP_API_KEY:-}" ]; then
     cmd_search_serpapi "$query" "$location" "$limit"
     return 0
   fi
 
-  echo "Error: SERP skill not configured. Add GOOGLE_PLACES_API_KEY to .env"
+  echo "Error: SERP skill not configured. Add GOOGLE_MAPS_API_KEY to .env"
   exit 1
 }
 
 cmd_details() {
   local place_id="${1:?Usage: places details <place_id>}"
 
-  if [ -z "${GOOGLE_PLACES_API_KEY:-}" ]; then
-    echo "Error: SERP skill not configured. Add GOOGLE_PLACES_API_KEY to .env"
+  if [ -z "${GOOGLE_MAPS_API_KEY:-}" ]; then
+    echo "Error: SERP skill not configured. Add GOOGLE_MAPS_API_KEY to .env"
     exit 1
   fi
 
   local fields="name,rating,user_ratings_total,price_level,formatted_address,formatted_phone_number,website,opening_hours,geometry,url,reviews"
-  local url="${GOOGLE_PLACES_BASE}/details/json?place_id=${place_id}&fields=${fields}&key=${GOOGLE_PLACES_API_KEY}"
+  local url="${GOOGLE_PLACES_BASE}/details/json?place_id=${place_id}&fields=${fields}&key=${GOOGLE_MAPS_API_KEY}"
 
   local json
   json=$(curl -sf --max-time 15 "$url") || { echo "Error: failed to fetch place details"; exit 1; }
