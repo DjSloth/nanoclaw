@@ -11,6 +11,8 @@ Commands:
   conditions <spotId>         Current conditions for a spot
   forecast <spotId> [days]    Hourly wave forecast (default: 1 day)
   search <query>              Find spot IDs by name
+  region <name> [limit]       Discover subregions and spots by country/region name
+  details <spotId>            Full spot profile: break type, crowd, best conditions, etc.
   favorites                   List favorite spots
 EOF
   exit 1
@@ -148,6 +150,125 @@ cmd_search() {
   '
 }
 
+cmd_region() {
+  local query="${1:?Usage: surfline region <name> [limit]}"
+  local size="${2:-15}"
+  local encoded_query
+  encoded_query=$(printf '%s' "$query" | jq -sRr @uri)
+  local url="${SURFLINE_BASE}/search/site?q=${encoded_query}&querySize=${size}"
+
+  local json
+  json=$(curl -sf --max-time 15 "$url") || { echo "Error: search failed"; exit 1; }
+
+  local subregion_count spot_count
+  subregion_count=$(echo "$json" | jq '[.[1].hits.hits // [] | .[]] | length')
+  spot_count=$(echo "$json" | jq '[.[0].hits.hits // [] | .[]] | length')
+
+  echo "Search: ${query} (${subregion_count} subregions, ${spot_count} spots)"
+  echo "---"
+
+  if [ "$subregion_count" -gt 0 ]; then
+    echo "Subregions:"
+    echo "$json" | jq -r '
+      .[1].hits.hits[]
+      | "  \(._source.name // ._source.liesIn // "Unknown")  ID: \(._id)"
+    '
+  fi
+
+  if [ "$spot_count" -gt 0 ]; then
+    echo ""
+    echo "Spots:"
+    echo "$json" | jq -r '
+      .[0].hits.hits[]
+      | (._source.breadCrumbs // [] | join(" > ")) as $bc
+      | "  \(._source.name)  ID: \(._id)" + (if $bc != "" then "  [\($bc)]" else "" end)
+    '
+  fi
+
+  if [ "$subregion_count" = "0" ] && [ "$spot_count" = "0" ]; then
+    echo "No results found for: ${query}"
+  fi
+}
+
+cmd_details() {
+  local spot_id="${1:?Usage: surfline details <spotId>}"
+  local url="${SURFLINE_BASE}/kbyg/spots/reports?spotId=${spot_id}"
+
+  local json
+  json=$(curl -sf --max-time 15 "$url") || { echo "Error: failed to fetch details for ${spot_id}"; exit 1; }
+
+  local td='.spot.travelDetails'
+
+  local name lat lon
+  name=$(echo "$json" | jq -r '.spot.name // "Unknown"')
+  lat=$(echo "$json" | jq -r '.spot.lat // "?"')
+  lon=$(echo "$json" | jq -r '.spot.lon // "?"')
+
+  local break_type bottom
+  break_type=$(echo "$json" | jq -r "($td.breakType // []) | map(gsub(\"_\"; \" \") | ascii_downcase) | join(\", \")" 2>/dev/null)
+  [ -z "$break_type" ] && break_type="Unknown"
+  bottom=$(echo "$json" | jq -r "($td.bottom.value // []) | join(\", \")" 2>/dev/null)
+  [ -z "$bottom" ] && bottom="Unknown"
+
+  local rating_summary rating_desc
+  rating_summary=$(echo "$json" | jq -r "$td.spotRating.summary // \"Unknown\"")
+  rating_desc=$(echo "$json" | jq -r "$td.spotRating.description // \"\"")
+
+  local ability boards
+  ability=$(echo "$json" | jq -r "$td.abilityLevels.summary // \"Unknown\"")
+  boards=$(echo "$json" | jq -r "($td.boardTypes // []) | join(\", \")" 2>/dev/null)
+  [ -z "$boards" ] && boards="Unknown"
+
+  local crowd_summary crowd_desc local_vibe water_quality
+  crowd_summary=$(echo "$json" | jq -r "$td.crowdFactor.summary // \"Unknown\"")
+  crowd_desc=$(echo "$json" | jq -r "$td.crowdFactor.description // \"\"")
+  local_vibe=$(echo "$json" | jq -r "$td.localVibe.summary // \"Unknown\"")
+  water_quality=$(echo "$json" | jq -r "$td.waterQuality.summary // \"Unknown\"")
+
+  local best_season best_size best_swell best_wind best_tide
+  best_season=$(echo "$json" | jq -r "($td.best.season.value // []) | join(\", \")" 2>/dev/null)
+  [ -z "$best_season" ] && best_season="Unknown"
+  best_size=$(echo "$json" | jq -r "$td.best.size.description // \"Unknown\"")
+  best_swell=$(echo "$json" | jq -r "$td.best.swellDirection.description // \"Unknown\"")
+  best_wind=$(echo "$json" | jq -r "$td.best.windDirection.description // \"Unknown\"")
+  best_tide=$(echo "$json" | jq -r "($td.best.tide.value // []) | map(gsub(\"_\"; \" \")) | join(\", \")" 2>/dev/null)
+  [ -z "$best_tide" ] && best_tide="Unknown"
+
+  local hazards access description
+  hazards=$(echo "$json" | jq -r "$td.hazards // \"None noted\"")
+  access=$(echo "$json" | jq -r "$td.access // \"Unknown\"")
+  description=$(echo "$json" | jq -r "$td.description // \"\"")
+
+  cat <<EOF
+${name}  [${break_type}]
+  Location: ${lat}, ${lon}
+  Bottom: ${bottom}
+  Rating: ${rating_summary}$([ -n "$rating_desc" ] && echo " — ${rating_desc}")
+
+  Ability: ${ability}
+  Boards: ${boards}
+
+  Crowd: ${crowd_summary}$([ -n "$crowd_desc" ] && echo " — ${crowd_desc}")
+  Local vibe: ${local_vibe}
+  Water quality: ${water_quality}
+
+  Best season: ${best_season}
+  Best size: ${best_size}
+  Best swell: ${best_swell}
+  Best wind: ${best_wind}
+  Best tide: ${best_tide}
+
+  Hazards: ${hazards}
+  Access: ${access}
+EOF
+
+  if [ -n "$description" ]; then
+    echo ""
+    echo "  [Overview]"
+    echo "  ${description}"
+  fi
+}
+
 cmd_favorites() {
   cat <<'EOF'
 Favorite spots:
@@ -173,6 +294,8 @@ case "$command" in
   conditions) cmd_conditions "$@" ;;
   forecast)   cmd_forecast "$@" ;;
   search)     cmd_search "$@" ;;
+  region)     cmd_region "$@" ;;
+  details)    cmd_details "$@" ;;
   favorites)  cmd_favorites ;;
   *)          usage ;;
 esac
