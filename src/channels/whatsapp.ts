@@ -6,6 +6,7 @@ import makeWASocket, {
   Browsers,
   DisconnectReason,
   WASocket,
+  downloadMediaMessage,
   fetchLatestWaWebVersion,
   makeCacheableSignalKeyStore,
   useMultiFileAuthState,
@@ -209,6 +210,24 @@ export class WhatsAppChannel implements Channel {
             }
           }
 
+          // Download image attachment if present
+          let images: Array<{ data: string; mimeType: string }> | undefined;
+          const imgMsg = msg.message?.imageMessage;
+          if (imgMsg) {
+            try {
+              const buffer = (await downloadMediaMessage(
+                msg,
+                'buffer',
+                {},
+                { logger: console as any, reuploadRequest: this.sock.updateMediaMessage },
+              )) as Buffer;
+              images = [{ data: buffer.toString('base64'), mimeType: imgMsg.mimetype || 'image/jpeg' }];
+              logger.info({ chatJid, bytes: buffer.length }, 'Downloaded image attachment');
+            } catch (err) {
+              logger.warn({ err }, 'Failed to download image attachment');
+            }
+          }
+
           this.opts.onMessage(chatJid, {
             id: msg.key.id || '',
             chat_jid: chatJid,
@@ -218,6 +237,7 @@ export class WhatsAppChannel implements Channel {
             timestamp,
             is_from_me: fromMe,
             is_bot_message: isBotMessage,
+            images,
           });
         }
       }

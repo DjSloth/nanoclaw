@@ -41,6 +41,7 @@ export interface ContainerInput {
   isMain: boolean;
   isScheduledTask?: boolean;
   assistantName?: string;
+  images?: Array<{ data: string; mimeType: string }>;
 }
 
 export interface ContainerOutput {

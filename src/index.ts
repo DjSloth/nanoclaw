@@ -73,6 +73,7 @@ let messageLoopRunning = false;
 
 const channels: Channel[] = [];
 const queue = new GroupQueue();
+const pendingImages: Map<string, Array<{ data: string; mimeType: string }>> = new Map();
 
 function loadState(): void {
   lastTimestamp = getRouterState('last_timestamp') || '';
@@ -215,6 +216,10 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
   const prompt = formatMessages(missedMessages, TIMEZONE);
 
+  // Collect and clear any pending images for this chat
+  const images = pendingImages.get(chatJid);
+  pendingImages.delete(chatJid);
+
   // Advance cursor so the piping path in startMessageLoop won't re-fetch
   // these messages. Save the old cursor so we can roll back on error.
   const previousCursor = lastAgentTimestamp[chatJid] || '';
@@ -245,7 +250,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   let hadError = false;
   let outputSentToUser = false;
 
-  const output = await runAgent(group, prompt, chatJid, async (result) => {
+  const output = await runAgent(group, prompt, chatJid, images, async (result) => {
     // Streaming output callback — called for each agent result
     if (result.result) {
       const raw =
@@ -302,6 +307,7 @@ async function runAgent(
   group: RegisteredGroup,
   prompt: string,
   chatJid: string,
+  images: Array<{ data: string; mimeType: string }> | undefined,
   onOutput?: (output: ContainerOutput) => Promise<void>,
 ): Promise<'success' | 'error'> {
   const isMain = group.isMain === true;
@@ -353,6 +359,7 @@ async function runAgent(
         chatJid,
         isMain,
         assistantName: ASSISTANT_NAME,
+        images: images?.length ? images : undefined,
       },
       (proc, containerName) =>
         queue.registerProcess(chatJid, proc, containerName, group.folder),
@@ -663,6 +670,10 @@ async function main(): Promise<void> {
         }
       }
       storeMessage(msg);
+      if (msg.images?.length) {
+        const existing = pendingImages.get(chatJid) || [];
+        pendingImages.set(chatJid, [...existing, ...msg.images]);
+      }
     },
     onChatMetadata: (
       chatJid: string,
