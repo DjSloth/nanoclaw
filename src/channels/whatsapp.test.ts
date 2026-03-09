@@ -98,6 +98,7 @@ vi.mock('@whiskeysockets/baileys', () => {
       },
       saveCreds: vi.fn(),
     }),
+    fetchLatestWaWebVersion: vi.fn().mockResolvedValue({ version: [2, 3000, 1] }),
   };
 });
 
