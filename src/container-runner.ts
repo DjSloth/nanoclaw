@@ -28,6 +28,7 @@ import {
 import { detectAuthMode } from './credential-proxy.js';
 import { validateAdditionalMounts } from './mount-security.js';
 import { RegisteredGroup } from './types.js';
+import { readEnvFile } from './env.js';
 
 // Sentinel markers for robust output parsing (must match agent-runner)
 const OUTPUT_START_MARKER = '---NANOCLAW_OUTPUT_START---';
@@ -229,6 +230,7 @@ function buildVolumeMounts(
 function buildContainerArgs(
   mounts: VolumeMount[],
   containerName: string,
+  secrets?: Record<string, string>,
 ): string[] {
   const args: string[] = ['run', '-i', '--rm', '--name', containerName];
 
@@ -265,6 +267,13 @@ function buildContainerArgs(
     args.push('-e', 'HOME=/home/node');
   }
 
+  // Inject secrets from host .env as individual environment variables
+  if (secrets) {
+    for (const [key, value] of Object.entries(secrets)) {
+      args.push('-e', `${key}=${value}`);
+    }
+  }
+
   for (const mount of mounts) {
     if (mount.readonly) {
       args.push(...readonlyMountArgs(mount.hostPath, mount.containerPath));
@@ -292,7 +301,9 @@ export async function runContainerAgent(
   const mounts = buildVolumeMounts(group, input.isMain);
   const safeName = group.folder.replace(/[^a-zA-Z0-9-]/g, '-');
   const containerName = `nanoclaw-${safeName}-${Date.now()}`;
-  const containerArgs = buildContainerArgs(mounts, containerName);
+  const secretKeys = group.containerConfig?.secrets ?? [];
+  const secrets = secretKeys.length > 0 ? readEnvFile(secretKeys) : undefined;
+  const containerArgs = buildContainerArgs(mounts, containerName, secrets);
 
   logger.debug(
     {
