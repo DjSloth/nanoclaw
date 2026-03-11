@@ -164,11 +164,16 @@ function buildVolumeMounts(
       const toolPath = path.join(dstDir, skillDir);
       const binLink = path.join(skillsBin, skillDir);
       try {
-        if (fs.existsSync(toolPath) && (fs.statSync(toolPath).mode & 0o111)) {
+        if (fs.existsSync(toolPath) && fs.statSync(toolPath).mode & 0o111) {
           fs.rmSync(binLink, { force: true });
-          fs.symlinkSync(path.join('/home/node/.claude/skills', skillDir, skillDir), binLink);
+          fs.symlinkSync(
+            path.join('/home/node/.claude/skills', skillDir, skillDir),
+            binLink,
+          );
         }
-      } catch { /* skip if symlink fails */ }
+      } catch {
+        /* skip if symlink fails */
+      }
     }
   }
   mounts.push({
@@ -237,21 +242,35 @@ function buildContainerArgs(
   // Pass host timezone so container's local time matches the user's
   args.push('-e', `TZ=${TIMEZONE}`);
 
-  // Route API traffic through the credential proxy (containers never see real secrets)
-  args.push(
-    '-e',
-    `ANTHROPIC_BASE_URL=http://${CONTAINER_HOST_GATEWAY}:${CREDENTIAL_PROXY_PORT}`,
-  );
-
-  // Mirror the host's auth method with a placeholder value.
-  // API key mode: SDK sends x-api-key, proxy replaces with real key.
-  // OAuth mode:   SDK exchanges placeholder token for temp API key,
-  //               proxy injects real OAuth token on that exchange request.
+  // Credential injection: how containers authenticate with the Anthropic API.
+  //
+  // API key mode: route through credential proxy which replaces placeholder
+  //   x-api-key with the real key. Containers never see real secrets.
+  //
+  // OAuth mode:  pass the real OAuth token directly. The Claude Code SDK
+  //   calls hardcoded OAuth endpoints on api.anthropic.com (profile check,
+  //   token exchange) that bypass ANTHROPIC_BASE_URL entirely, so the
+  //   proxy cannot intercept them. A placeholder token would 401 on these
+  //   direct calls.  The SDK exchanges the real token for a short-lived
+  //   API key internally, so the OAuth token exposure is brief.
+  //   See: upstream NanoClaw PRs #871, #900, #930.
   const authMode = detectAuthMode();
   if (authMode === 'api-key') {
+    args.push(
+      '-e',
+      `ANTHROPIC_BASE_URL=http://${CONTAINER_HOST_GATEWAY}:${CREDENTIAL_PROXY_PORT}`,
+    );
     args.push('-e', 'ANTHROPIC_API_KEY=placeholder');
   } else {
-    args.push('-e', 'CLAUDE_CODE_OAUTH_TOKEN=placeholder');
+    const oauthSecrets = readEnvFile([
+      'CLAUDE_CODE_OAUTH_TOKEN',
+      'ANTHROPIC_AUTH_TOKEN',
+    ]);
+    const oauthToken =
+      oauthSecrets.CLAUDE_CODE_OAUTH_TOKEN || oauthSecrets.ANTHROPIC_AUTH_TOKEN;
+    if (oauthToken) {
+      args.push('-e', `CLAUDE_CODE_OAUTH_TOKEN=${oauthToken}`);
+    }
   }
 
   // Runtime-specific args for host gateway resolution

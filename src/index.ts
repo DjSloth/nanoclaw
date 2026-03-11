@@ -59,7 +59,12 @@ import {
   shouldDropMessage,
 } from './sender-allowlist.js';
 import { startSchedulerLoop } from './task-scheduler.js';
-import { Channel, ContainerConfig, NewMessage, RegisteredGroup } from './types.js';
+import {
+  Channel,
+  ContainerConfig,
+  NewMessage,
+  RegisteredGroup,
+} from './types.js';
 import { logger } from './logger.js';
 
 // Re-export for backwards compatibility during refactor
@@ -73,7 +78,10 @@ let messageLoopRunning = false;
 
 const channels: Channel[] = [];
 const queue = new GroupQueue();
-const pendingImages: Map<string, Array<{ data: string; mimeType: string }>> = new Map();
+const pendingImages: Map<
+  string,
+  Array<{ data: string; mimeType: string }>
+> = new Map();
 
 function loadState(): void {
   lastTimestamp = getRouterState('last_timestamp') || '';
@@ -93,13 +101,21 @@ function loadState(): void {
       const configPath = path.join(DATA_DIR, 'main-container-config.json');
       try {
         if (fs.existsSync(configPath)) {
-          const parsed = JSON.parse(fs.readFileSync(configPath, 'utf-8')) as ContainerConfig;
+          const parsed = JSON.parse(
+            fs.readFileSync(configPath, 'utf-8'),
+          ) as ContainerConfig;
           group.containerConfig = parsed;
           setRegisteredGroup(jid, group);
-          logger.info({ configPath }, 'Applied main group container config from file');
+          logger.info(
+            { configPath },
+            'Applied main group container config from file',
+          );
         }
       } catch (err) {
-        logger.warn({ configPath, err }, 'Failed to load main container config');
+        logger.warn(
+          { configPath, err },
+          'Failed to load main container config',
+        );
       }
     }
   }
@@ -132,9 +148,14 @@ function registerGroup(jid: string, group: RegisteredGroup): void {
     const configPath = path.join(DATA_DIR, 'main-container-config.json');
     try {
       if (fs.existsSync(configPath)) {
-        const parsed = JSON.parse(fs.readFileSync(configPath, 'utf-8')) as ContainerConfig;
+        const parsed = JSON.parse(
+          fs.readFileSync(configPath, 'utf-8'),
+        ) as ContainerConfig;
         group.containerConfig = parsed;
-        logger.info({ configPath }, 'Loaded main group container config from file');
+        logger.info(
+          { configPath },
+          'Loaded main group container config from file',
+        );
       }
     } catch (err) {
       logger.warn({ configPath, err }, 'Failed to load main container config');
@@ -250,32 +271,41 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   let hadError = false;
   let outputSentToUser = false;
 
-  const output = await runAgent(group, prompt, chatJid, images, async (result) => {
-    // Streaming output callback — called for each agent result
-    if (result.result) {
-      const raw =
-        typeof result.result === 'string'
-          ? result.result
-          : JSON.stringify(result.result);
-      // Strip <internal>...</internal> blocks — agent uses these for internal reasoning
-      const text = raw.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
-      logger.info({ group: group.name }, `Agent output: ${raw.slice(0, 200)}`);
-      if (text) {
-        await channel.sendMessage(chatJid, text);
-        outputSentToUser = true;
+  const output = await runAgent(
+    group,
+    prompt,
+    chatJid,
+    images,
+    async (result) => {
+      // Streaming output callback — called for each agent result
+      if (result.result) {
+        const raw =
+          typeof result.result === 'string'
+            ? result.result
+            : JSON.stringify(result.result);
+        // Strip <internal>...</internal> blocks — agent uses these for internal reasoning
+        const text = raw.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
+        logger.info(
+          { group: group.name },
+          `Agent output: ${raw.slice(0, 200)}`,
+        );
+        if (text) {
+          await channel.sendMessage(chatJid, text);
+          outputSentToUser = true;
+        }
+        // Only reset idle timer on actual results, not session-update markers (result: null)
+        resetIdleTimer();
       }
-      // Only reset idle timer on actual results, not session-update markers (result: null)
-      resetIdleTimer();
-    }
 
-    if (result.status === 'success') {
-      queue.notifyIdle(chatJid);
-    }
+      if (result.status === 'success') {
+        queue.notifyIdle(chatJid);
+      }
 
-    if (result.status === 'error') {
-      hadError = true;
-    }
-  });
+      if (result.status === 'error') {
+        hadError = true;
+      }
+    },
+  );
 
   await channel.setTyping?.(chatJid, false);
   if (idleTimer) clearTimeout(idleTimer);
@@ -572,7 +602,9 @@ function loadScheduledTasksConfig(): void {
       let nextRun: string | null = null;
       if (task.schedule_type === 'cron') {
         try {
-          const interval = CronExpressionParser.parse(task.schedule_value, { tz: TIMEZONE });
+          const interval = CronExpressionParser.parse(task.schedule_value, {
+            tz: TIMEZONE,
+          });
           nextRun = interval.next().toISOString();
         } catch {
           logger.warn(
@@ -584,7 +616,10 @@ function loadScheduledTasksConfig(): void {
       } else if (task.schedule_type === 'interval') {
         const ms = parseInt(task.schedule_value, 10);
         if (isNaN(ms) || ms <= 0) {
-          logger.warn({ taskName: task.name }, 'Invalid interval in scheduled-tasks.json, skipping');
+          logger.warn(
+            { taskName: task.name },
+            'Invalid interval in scheduled-tasks.json, skipping',
+          );
           continue;
         }
         nextRun = new Date(Date.now() + ms).toISOString();
@@ -607,7 +642,10 @@ function loadScheduledTasksConfig(): void {
           status: 'active',
           created_at: new Date().toISOString(),
         });
-        logger.info({ taskId, taskName: task.name, targetFolder: targetGroup.folder }, 'Config task created');
+        logger.info(
+          { taskId, taskName: task.name, targetFolder: targetGroup.folder },
+          'Config task created',
+        );
       } else if (
         existing.prompt !== task.prompt ||
         existing.schedule_value !== task.schedule_value ||
@@ -716,7 +754,10 @@ async function main(): Promise<void> {
     sendMessage: async (jid, rawText) => {
       const channel = findChannel(channels, jid);
       if (!channel) {
-        logger.warn({ jid }, 'No channel owns JID, cannot send message');
+        logger.error(
+          { jid },
+          'Scheduled task: no channel owns JID — message dropped',
+        );
         return;
       }
       const text = formatOutbound(rawText);
