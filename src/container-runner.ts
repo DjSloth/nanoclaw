@@ -228,7 +228,7 @@ function buildVolumeMounts(
     mounts.push({
       hostPath: gwsConfigDir,
       containerPath: '/home/node/.config/gws',
-      readonly: true,
+      readonly: false, // gws needs write access for token cache
     });
   }
 
