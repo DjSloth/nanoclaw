@@ -39,8 +39,8 @@ ENV PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium
 # Add skill executables directory to PATH
 ENV PATH="/home/node/.claude/bin:${PATH}"
 
-# Install agent-browser and claude-code globally
-RUN npm install -g agent-browser @anthropic-ai/claude-code
+# Install agent-browser, claude-code, and gws (Google Workspace CLI)
+RUN npm install -g agent-browser @anthropic-ai/claude-code @googleworkspace/cli
 
 # Create app directory
 WORKDIR /app

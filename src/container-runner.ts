@@ -219,6 +219,19 @@ function buildVolumeMounts(
     readonly: false,
   });
 
+  // Mount Google Workspace CLI credentials (read-only) so gws works in containers.
+  // Each account's credentials live in ~/.config/gws/creds-<account>.json (exported
+  // with `gws auth export --unmasked`). The active account is selected via
+  // GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE in .env, injected automatically.
+  const gwsConfigDir = path.join(process.env.HOME || '/root', '.config', 'gws');
+  if (fs.existsSync(gwsConfigDir)) {
+    mounts.push({
+      hostPath: gwsConfigDir,
+      containerPath: '/home/node/.config/gws',
+      readonly: true,
+    });
+  }
+
   // Additional mounts validated against external allowlist (tamper-proof from containers)
   if (group.containerConfig?.additionalMounts) {
     const validatedMounts = validateAdditionalMounts(
