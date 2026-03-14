@@ -28,7 +28,7 @@ import {
 import { detectAuthMode } from './credential-proxy.js';
 import { validateAdditionalMounts } from './mount-security.js';
 import { RegisteredGroup } from './types.js';
-import { readEnvFile } from './env.js';
+import { readAllEnvFile, readEnvFile } from './env.js';
 
 // Sentinel markers for robust output parsing (must match agent-runner)
 const OUTPUT_START_MARKER = '---NANOCLAW_OUTPUT_START---';
@@ -320,8 +320,15 @@ export async function runContainerAgent(
   const mounts = buildVolumeMounts(group, input.isMain);
   const safeName = group.folder.replace(/[^a-zA-Z0-9-]/g, '-');
   const containerName = `nanoclaw-${safeName}-${Date.now()}`;
-  const secretKeys = group.containerConfig?.secrets ?? [];
-  const secrets = secretKeys.length > 0 ? readEnvFile(secretKeys) : undefined;
+  // Inject all .env keys into the container, excluding keys that are already
+  // handled by the credential proxy / auth path and NanoClaw-internal config.
+  const secrets = readAllEnvFile([
+    'CLAUDE_CODE_OAUTH_TOKEN',
+    'ANTHROPIC_AUTH_TOKEN',
+    'ANTHROPIC_API_KEY',
+    'ASSISTANT_NAME',
+    'ASSISTANT_HAS_OWN_NUMBER',
+  ]);
   const containerArgs = buildContainerArgs(mounts, containerName, secrets);
 
   logger.debug(
