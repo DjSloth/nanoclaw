@@ -219,17 +219,21 @@ function buildVolumeMounts(
     readonly: false,
   });
 
-  // Mount Google Workspace CLI credentials (read-only) so gws works in containers.
-  // Each account's credentials live in ~/.config/gws/creds-<account>.json (exported
-  // with `gws auth export --unmasked`). The active account is selected via
-  // GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE in .env, injected automatically.
-  const gwsConfigDir = path.join(process.env.HOME || '/root', '.config', 'gws');
-  if (fs.existsSync(gwsConfigDir)) {
-    mounts.push({
-      hostPath: gwsConfigDir,
-      containerPath: '/home/node/.config/gws',
-      readonly: false, // gws needs write access for token cache
-    });
+  // Mount Google Workspace CLI credentials so gws works in containers.
+  // In Doppler mode: init-gws-creds.sh generates the files at container startup
+  // from Doppler env vars — no host mount needed.
+  // In local/.env mode: mount the host's ~/.config/gws/ directory directly.
+  const hasDoppler =
+    !!process.env.DOPPLER_TOKEN || !!readEnvFile(['DOPPLER_TOKEN']).DOPPLER_TOKEN;
+  if (!hasDoppler) {
+    const gwsConfigDir = path.join(process.env.HOME || '/root', '.config', 'gws');
+    if (fs.existsSync(gwsConfigDir)) {
+      mounts.push({
+        hostPath: gwsConfigDir,
+        containerPath: '/home/node/.config/gws',
+        readonly: false, // gws needs write access for token cache
+      });
+    }
   }
 
   // Additional mounts validated against external allowlist (tamper-proof from containers)
@@ -333,15 +337,22 @@ export async function runContainerAgent(
   const mounts = buildVolumeMounts(group, input.isMain);
   const safeName = group.folder.replace(/[^a-zA-Z0-9-]/g, '-');
   const containerName = `nanoclaw-${safeName}-${Date.now()}`;
-  // Inject all .env keys into the container, excluding keys that are already
-  // handled by the credential proxy / auth path and NanoClaw-internal config.
-  const secrets = readAllEnvFile([
-    'CLAUDE_CODE_OAUTH_TOKEN',
-    'ANTHROPIC_AUTH_TOKEN',
-    'ANTHROPIC_API_KEY',
-    'ASSISTANT_NAME',
-    'ASSISTANT_HAS_OWN_NUMBER',
-  ]);
+  // Inject secrets into the container.
+  // In Doppler mode: pass only DOPPLER_TOKEN — the container's entrypoint runs
+  // `doppler run` internally which injects all secrets from Doppler.
+  // In local/.env mode: inject all .env keys, excluding keys handled by the
+  // credential proxy / auth path and NanoClaw-internal config.
+  const dopplerToken =
+    process.env.DOPPLER_TOKEN || readEnvFile(['DOPPLER_TOKEN']).DOPPLER_TOKEN;
+  const secrets = dopplerToken
+    ? { DOPPLER_TOKEN: dopplerToken }
+    : readAllEnvFile([
+        'CLAUDE_CODE_OAUTH_TOKEN',
+        'ANTHROPIC_AUTH_TOKEN',
+        'ANTHROPIC_API_KEY',
+        'ASSISTANT_NAME',
+        'ASSISTANT_HAS_OWN_NUMBER',
+      ]);
   const containerArgs = buildContainerArgs(mounts, containerName, secrets);
 
   logger.debug(

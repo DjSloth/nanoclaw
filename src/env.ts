@@ -34,14 +34,20 @@ function parseEnvFile(): Record<string, string> {
 
 /**
  * Parse the .env file and return values for the requested keys.
+ * Falls back to process.env for keys not found in .env (e.g. when the host
+ * process was started via `doppler run` which injects secrets into process.env).
  * Does NOT load anything into process.env — callers decide what to
  * do with the values. This keeps secrets out of the process environment
  * so they don't leak to child processes.
  */
 export function readEnvFile(keys: string[]): Record<string, string> {
   const all = parseEnvFile();
-  const wanted = new Set(keys);
-  return Object.fromEntries(Object.entries(all).filter(([k]) => wanted.has(k)));
+  const result: Record<string, string> = {};
+  for (const key of keys) {
+    if (all[key]) result[key] = all[key];
+    else if (process.env[key]) result[key] = process.env[key]!;
+  }
+  return result;
 }
 
 /**
