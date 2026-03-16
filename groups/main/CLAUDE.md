@@ -63,6 +63,36 @@ Keep messages clean and readable for WhatsApp.
 
 ---
 
+## Google Workspace (GWS)
+
+Three accounts are configured. Each account has an isolated config directory to prevent token cache conflicts.
+
+Use `XDG_CONFIG_HOME` to switch accounts:
+
+| Account | XDG_CONFIG_HOME |
+|---------|----------------|
+| dotanraz@gmail.com | `/home/node/.config/gws/gmail` |
+| raz@slothlabs.dev | `/home/node/.config/gws/slothlabs` |
+| dotan@invocap.com | `/home/node/.config/gws/invocap` |
+
+```bash
+# Gmail
+XDG_CONFIG_HOME=/home/node/.config/gws/gmail gws gmail +triage
+
+# SlothLabs
+XDG_CONFIG_HOME=/home/node/.config/gws/slothlabs gws gmail +triage
+
+# Invocap
+XDG_CONFIG_HOME=/home/node/.config/gws/invocap gws gmail +triage
+
+# Calendar (same pattern)
+XDG_CONFIG_HOME=/home/node/.config/gws/invocap gws calendar +agenda --today --timezone Asia/Jerusalem
+```
+
+Each directory contains `gws/credentials.json` with isolated token cache per account.
+
+---
+
 ## Admin Context
 
 This is the **main channel**, which has elevated privileges.
