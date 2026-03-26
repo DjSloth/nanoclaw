@@ -11,7 +11,9 @@ cat > /tmp/input.json
 
 # Run with Doppler if token is provided, otherwise run directly (local dev)
 if [ -n "$DOPPLER_TOKEN" ]; then
-  exec doppler run --token="$DOPPLER_TOKEN" -- bash -c 'bash /scripts/init-gws-creds.sh && node /tmp/dist/index.js < /tmp/input.json'
+  exec doppler run --token="$DOPPLER_TOKEN" -- bash -c \
+    'bash /scripts/init-gws-creds.sh && bash /scripts/init-git-creds.sh && node /tmp/dist/index.js < /tmp/input.json'
 else
+  bash /scripts/init-git-creds.sh
   exec node /tmp/dist/index.js < /tmp/input.json
 fi

@@ -150,6 +150,10 @@ function buildVolumeMounts(
 
   // Sync skills from container/skills/ into each group's .claude/skills/
   // Also symlink executable tools into .claude/bin/ so they're on the PATH
+  //
+  // Main group: symlink skill dirs to /workspace/extra/skills/{skillDir} so
+  // edits to the writable container/skills mount are live immediately.
+  // Other groups: copy as before (they don't have the writable mount).
   const skillsSrc = path.join(process.cwd(), 'container', 'skills');
   const skillsDst = path.join(groupSessionsDir, 'skills');
   const skillsBin = path.join(groupSessionsDir, 'bin');
@@ -159,9 +163,19 @@ function buildVolumeMounts(
       const srcDir = path.join(skillsSrc, skillDir);
       if (!fs.statSync(srcDir).isDirectory()) continue;
       const dstDir = path.join(skillsDst, skillDir);
-      fs.cpSync(srcDir, dstDir, { recursive: true });
+      if (isMain) {
+        // Symlink to the writable mount path inside the container so edits are live
+        fs.rmSync(dstDir, { force: true, recursive: true });
+        fs.mkdirSync(skillsDst, { recursive: true });
+        fs.symlinkSync(
+          path.join('/workspace/extra/skills', skillDir),
+          dstDir,
+        );
+      } else {
+        fs.cpSync(srcDir, dstDir, { recursive: true });
+      }
       // Symlink executable files (same name as skill dir) into bin/
-      const toolPath = path.join(dstDir, skillDir);
+      const toolPath = path.join(isMain ? srcDir : dstDir, skillDir);
       const binLink = path.join(skillsBin, skillDir);
       try {
         if (fs.existsSync(toolPath) && fs.statSync(toolPath).mode & 0o111) {
