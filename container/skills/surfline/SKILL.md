@@ -145,6 +145,42 @@ Use these profiles to assess whether a spot is working. Cross-reference live dat
 2. Identify the best windows: time slots where energy, wind, and consistency align with spot profiles
 3. Recommend specific sessions: "Saturday morning at Poleg looks clean — 80 kJ, offshore, 85% consistency"
 
+### Single-spot forecast — preferred output format
+
+When asked about a specific spot for a specific day, present an **hourly list** (no table headers) followed by a short summary. Designed for WhatsApp mobile — rows must be self-describing if they wrap.
+
+**Row format:**
+```
+HH:MM  RATING  🌊 Size  Swell@period  ⚡EnergyKJ  🎯Consistency%  💨 WindDir Speedkph WindType
+·  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·
+```
+
+**Example:**
+```
+*🏭 Power Plant — Saturday 28 March* 🌅 06:35 🌇 18:58 🦈
+
+06:00  FAIR  🌊 Waist-chest  WNW@7s  ⚡181kJ  🎯82%  💨 ESE 3kph Offshore
+·  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·
+07:00  FAIR  🌊 Waist-chest  WNW@7s  ⚡168kJ  🎯80%  💨 SE 4kph Offshore
+·  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·
+08:00  FAIR  🌊 Waist-chest  WNW@7s  ⚡155kJ  🎯76%  💨 SE 5kph Offshore
+
+*The story:*
+• Energy & consistency — ...
+• Wind — ...
+• Best window: ...
+```
+
+**Rules:**
+- Emoji key: 🌊 wave size · ⚡ energy · 🎯 consistency · 💨 wind
+- No table header row — emojis make fields self-describing
+- Dotted separator `·  ·  ·  ·  ·` between every row
+- Rating: label only, no number (POOR / POOR TO FAIR / FAIR / GOOD / EPIC)
+- Only show daylight hours (sunrise to sunset) unless notable pre/post windows exist
+- Add 🦈 to Power Plant header during shark season (Dec–May) — no dawn/dusk sessions
+- Sunrise 🌅 and sunset 🌇 in header line only, not in rows
+- End with verdict: best window or "no clean window today"
+
 ### Gap detection — completing spot profiles
 
 When you encounter a favorite spot with an incomplete profile (or a newly added spot):
