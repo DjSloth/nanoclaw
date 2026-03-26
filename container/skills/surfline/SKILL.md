@@ -186,4 +186,3 @@ Use `mcp__nanoclaw__schedule_task` for one-off or temporary tasks. These are sto
 
 **Removing a report:**
 - Config file tasks: set `"enabled": false` or remove the entry, then restart
-- Native tasks: use `mcp__nanoclaw__delete_task`
