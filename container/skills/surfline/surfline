@@ -108,23 +108,65 @@ EOF
 cmd_forecast() {
   local spot_id="${1:?Usage: surfline forecast <spotId> [days]}"
   local days="${2:-1}"
-  local url="${SURFLINE_BASE}/kbyg/spots/forecasts/wave?spotId=${spot_id}&days=${days}"
+  local tok="${SURFLINE_ACCESS_TOKEN:-}"
 
-  local json
-  json=$(curl -sf --max-time 15 "$url") || { echo "Error: failed to fetch forecast for ${spot_id}"; exit 1; }
+  # Build URLs — use accesstoken param when available for corrected/premium data
+  local auth_param=""
+  [ -n "$tok" ] && auth_param="&accesstoken=${tok}"
 
-  echo "${spot_id} — ${days}-day wave forecast"
+  local wave_url="${SURFLINE_BASE}/kbyg/spots/forecasts/wave?spotId=${spot_id}&days=${days}${auth_param}"
+  local wind_url="${SURFLINE_BASE}/kbyg/spots/forecasts/wind?spotId=${spot_id}&days=${days}&corrected=true&units%5BwindSpeed%5D=KPH${auth_param}"
+  local rating_url="${SURFLINE_BASE}/kbyg/spots/forecasts/rating?spotId=${spot_id}&days=${days}${auth_param}"
+  local swells_url="${SURFLINE_BASE}/kbyg/spots/forecasts/swells?spotId=${spot_id}&days=${days}&units%5BswellHeight%5D=M${auth_param}"
+  local sunlight_url="${SURFLINE_BASE}/kbyg/spots/forecasts/sunlight?spotId=${spot_id}&days=${days}${auth_param}"
+
+  local wave_json wind_json rating_json swells_json sunlight_json consistency_json
+  wave_json=$(curl -sf --max-time 15 "$wave_url") || { echo "Error: failed to fetch wave forecast for ${spot_id}"; exit 1; }
+  wind_json=$(curl -sf --max-time 15 "$wind_url") || { echo "Error: failed to fetch wind forecast for ${spot_id}"; exit 1; }
+  rating_json=$(curl -sf --max-time 15 "$rating_url") || { echo "Error: failed to fetch rating forecast for ${spot_id}"; exit 1; }
+  swells_json=$(curl -sf --max-time 15 "$swells_url" 2>/dev/null || echo '{"data":{"swells":[]}}')
+  sunlight_json=$(curl -sf --max-time 15 "$sunlight_url" 2>/dev/null || echo '{"data":{"sunlight":[]}}')
+
+  # Consistency requires access token (premium endpoint)
+  if [ -n "$tok" ]; then
+    local consistency_url="${SURFLINE_BASE}/kbyg/spots/forecasts/consistency?spotId=${spot_id}&days=${days}&intervalHours=1&accesstoken=${tok}"
+    consistency_json=$(curl -sf --max-time 15 "$consistency_url" 2>/dev/null || echo '{"data":{"consistency":[]}}')
+  else
+    consistency_json='{"data":{"consistency":[]}}'
+  fi
+
+  echo "${spot_id} — ${days}-day forecast"
   echo "---"
 
-  echo "$json" | jq -r '
-    .data.wave[]
+  # Print sunrise/sunset times as header per day
+  echo "$sunlight_json" | jq -r '
+    .data.sunlight[]?
+    | (.sunrise + (.sunriseUTCOffset * 3600) | todate | split("T")[1][0:5]) as $rise
+    | (.sunset  + (.sunsetUTCOffset  * 3600) | todate | split("T")[1][0:5]) as $set
+    | (.midnight + (.midnightUTCOffset * 3600) | todate | split("T")[0]) as $day
+    | "\($day)  🌅 \($rise)  🌇 \($set)"
+  ' 2>/dev/null
+  echo ""
+
+  echo "$wave_json" "$wind_json" "$rating_json" "$swells_json" "$consistency_json" | jq -rs '
+    def deg2c(d): ["N","NNE","NE","ENE","E","ESE","SE","SSE","S","SSW","SW","WSW","W","WNW","NW","NNW"]
+                  | .[(((d + 11.25) / 22.5) | floor) % 16];
+
+    (.[1].data.wind       | map({key: (.timestamp | tostring), value: .}) | from_entries) as $wind
+    | (.[2].data.rating   | map({key: (.timestamp | tostring), value: .}) | from_entries) as $rating
+    | (.[3].data.swells   | map({key: (.timestamp | tostring), value: .}) | from_entries) as $swells
+    | (.[4].data.consistency | map({key: (.timestamp | tostring), value: .}) | from_entries) as $consist
+    | .[0].data.wave[]
     | (.timestamp + (.utcOffset * 3600) | todate | split("T") | .[0] + " " + (.[1] | split("+")[0] | split("Z")[0] | .[0:5])) as $time
-    | (.swells[0] // {}) as $swell
-    | (if ($swell.direction // null) != null then
-        (["N","NNE","NE","ENE","E","ESE","SE","SSE","S","SSW","SW","WSW","W","WNW","NW","NNW"]
-         | .[(($swell.direction + 11.25) / 22.5 | floor) % 16])
-       else "?" end) as $dir
-    | "\($time)  \(.surf.min)-\(.surf.max)m  \($dir)@\($swell.period // 0)s  \(.power | round)kJ  consistency:\(.probability | round)%  \(.surf.humanRelation // "")"
+    | (.swells[0] // {}) as $swell0
+    | ($swells[(.timestamp | tostring)] // {swells: []}) as $sw
+    | ($sw.swells // [] | map(select(.impact > 0)) | sort_by(-.impact) | .[0] // $swell0) as $primary
+    | (if ($primary.direction // null) != null then deg2c($primary.direction) else "?" end) as $dir
+    | ($wind[(.timestamp | tostring)] // {}) as $w
+    | (if ($w.direction // null) != null then deg2c($w.direction) else "?" end) as $wdir
+    | ($rating[(.timestamp | tostring)].rating // {}) as $r
+    | ($consist[(.timestamp | tostring)].consistency.waveCount // null) as $c
+    | "\($time)  [\($r.value // "?")/5 \($r.key // "?")]  \(.surf.min)-\(.surf.max)m  \($dir)@\($primary.period // 0)s  \(.power | round)kJ\(if $c != null then "  consistency:\($c | round)%" else "" end)  wind:\($wdir) \($w.speed // "?" | if type=="number" then round else . end)kph(\($w.directionType // "?"))  \(.surf.humanRelation // "")"
   ' 2>/dev/null || echo "Could not parse forecast data"
 }
 
