@@ -73,6 +73,12 @@ These are the user's current favorite Surfline spots. When the user asks about "
 | The Fort (The Old Port at Atlit) | 640a6699451905095aa61467 |
 | The Sandbox (Poleg Beach) | 640a665799dd44dd3d0c88df |
 
+## WhatsApp groups
+
+| Group | Focus |
+|-------|-------|
+| Reservoir Dogs (formerly המטבחון של הבלקון) | Core Sandbox crew — The Balcony gang. Primary spot: The Sandbox. Reports to this group should lead with Sandbox, mention Power Plant as backup. |
+
 ## Consistency scale
 
 Consistency % is a MAJOR factor — always report it:
