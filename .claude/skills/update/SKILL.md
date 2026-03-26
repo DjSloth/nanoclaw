@@ -1,6 +1,9 @@
 ---
 name: update
 description: "Update NanoClaw from upstream. Fetches latest changes, merges with your customizations and skills, runs migrations. Triggers on \"update\", \"pull upstream\", \"sync with upstream\", \"get latest changes\"."
+version: 1.0.0
+allowed-tools: Bash, Read, Write, Edit
+invocation: slash
 ---
 
 # Update NanoClaw

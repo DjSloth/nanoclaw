@@ -1,6 +1,9 @@
 ---
 name: add-reactions
 description: Add WhatsApp emoji reaction support — receive, send, store, and search reactions.
+version: 1.0.0
+allowed-tools: Bash, Read, Write, Edit
+invocation: slash
 ---
 
 # Add Reactions

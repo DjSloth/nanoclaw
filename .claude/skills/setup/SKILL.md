@@ -1,6 +1,9 @@
 ---
 name: setup
 description: Run initial NanoClaw setup. Use when user wants to install dependencies, authenticate WhatsApp, register their main channel, or start the background services. Triggers on "setup", "install", "configure nanoclaw", or first-time setup requests.
+version: 1.0.0
+allowed-tools: Bash, Read, Write, Edit
+invocation: slash
 ---
 
 # NanoClaw Setup

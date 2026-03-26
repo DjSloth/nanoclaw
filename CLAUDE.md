@@ -17,9 +17,12 @@ Single Node.js process that connects to WhatsApp, routes messages to Claude Agen
 | `src/config.ts` | Trigger pattern, paths, intervals |
 | `src/container-runner.ts` | Spawns agent containers with mounts |
 | `src/task-scheduler.ts` | Runs scheduled tasks |
+| `src/group-queue.ts` | Per-group queue with global concurrency limit |
 | `src/db.ts` | SQLite operations |
 | `groups/{name}/CLAUDE.md` | Per-group memory (isolated) |
 | `container/skills/agent-browser.md` | Browser automation tool (available to all agents via Bash) |
+| `AGENTS.md` | AI agent reference guide (architecture, security boundaries, container context) |
+| `docs/SKILLS_ARCHITECTURE.md` | Skills system: git merge mechanics, apply flow, conflict resolution |
 
 ## Skills
 
@@ -32,13 +35,12 @@ Single Node.js process that connects to WhatsApp, routes messages to Claude Agen
 | `/qodo-pr-resolver` | Fetch and fix Qodo PR review issues interactively or in batch |
 | `/get-qodo-rules` | Load org- and repo-level coding rules from Qodo before code tasks |
 
-## Development
-
-Run commands directly—don't tell the user to run them.
+## Commands
 
 ```bash
 npm run dev          # Run with hot reload
 npm run build        # Compile TypeScript
+npm test             # Run vitest test suite
 ./container/build.sh # Rebuild agent container
 ```
 
@@ -54,6 +56,8 @@ systemctl --user start nanoclaw
 systemctl --user stop nanoclaw
 systemctl --user restart nanoclaw
 ```
+
+Run commands directly—don't tell the user to run them.
 
 ## Container Build Cache
 

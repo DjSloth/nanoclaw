@@ -7,7 +7,15 @@
 ## Description
 
 
-## For Skills
+## Testing
+
+- [ ] `npm run build` passes (TypeScript compiles)
+- [ ] `npm test` passes
+- [ ] For skills: tested on fresh clone
+
+## Skill Checklist
+
+Only applicable if this PR adds a skill:
 
 - [ ] I have not made any changes to source code
 - [ ] My skill contains instructions for Claude to follow (not pre-built code)

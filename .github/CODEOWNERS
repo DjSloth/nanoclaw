@@ -6,5 +6,13 @@
 /package.json @gavrielc
 /package-lock.json @gavrielc
 
+# Documentation and configuration - maintainer owned
+/docs/ @gavrielc
+/.github/ @gavrielc
+/CLAUDE.md @gavrielc
+/CONTRIBUTING.md @gavrielc
+/README.md @gavrielc
+*.md @gavrielc
+
 # Skills - open to contributors
 /.claude/skills/

@@ -1,5 +1,44 @@
 # NanoClaw Skills Architecture
 
+## Table of Contents
+
+1. [What Skills Are For](#what-skills-are-for)
+2. [Why This Architecture](#why-this-architecture)
+3. [Core Principle](#core-principle)
+   - [The Three-Level Resolution Model](#the-three-level-resolution-model)
+   - [Safe Operations via Backup/Restore](#safe-operations-via-backuprestore)
+4. [The Shared Base](#1-the-shared-base)
+5. [Two Types of Changes: Code Merges vs. Structured Operations](#2-two-types-of-changes-code-merges-vs-structured-operations)
+6. [Skill Package Structure](#3-skill-package-structure)
+7. [Skills, Customization, and Layering](#4-skills-customization-and-layering)
+8. [File Operations: Renames, Deletes, Moves](#5-file-operations-renames-deletes-moves)
+9. [The Apply Flow](#6-the-apply-flow)
+10. [Shared Resolution Cache](#7-shared-resolution-cache)
+11. [State Tracking](#8-state-tracking)
+12. [Untracked Changes](#9-untracked-changes)
+13. [Core Updates](#10-core-updates)
+14. [Skill Removal (Uninstall)](#11-skill-removal-uninstall)
+15. [Rebase](#12-rebase)
+16. [Replay](#13-replay)
+17. [Skill Tests](#14-skill-tests)
+18. [Project Configuration](#15-project-configuration)
+19. [Directory Structure](#16-directory-structure)
+20. [Design Principles](#17-design-principles)
+
+---
+
+## What Skills Are For
+
+NanoClaw's core is intentionally minimal. Skills are how users extend it: adding channels, integrations, cross-platform support, or replacing internals entirely. Examples: add Telegram alongside WhatsApp, switch from Apple Container to Docker, add Gmail integration, add voice message transcription. Each skill modifies the actual codebase, adding channel handlers, updating the message router, changing container configuration, and adding dependencies, rather than working through a plugin API or runtime hooks.
+
+## Why This Architecture
+
+The problem: users need to combine multiple modifications to a shared codebase, keep those modifications working across core updates, and do all of this without becoming git experts or losing their custom changes. A plugin system would be simpler but constrains what skills can do. Giving skills full codebase access means they can change anything, but that creates merge conflicts, update breakage, and state tracking challenges.
+
+This architecture solves that by making skill application fully programmatic using standard git mechanics, with AI as a fallback for conflicts git can't resolve, and a shared resolution cache so most users never hit those conflicts at all. The result: users compose exactly the features they want, customizations survive core updates automatically, and the system is always recoverable.
+
+---
+
 ## Core Principle
 
 Skills are self-contained, auditable packages that apply programmatically via standard git merge mechanics. Claude Code orchestrates the process — running git commands, reading skill manifests, and stepping in only when git can't resolve a conflict on its own. The system uses existing git features (`merge-file`, `rerere`, `apply`) rather than custom merge infrastructure.
@@ -794,8 +833,7 @@ Recompute structured operations against the updated codebase to ensure consisten
 
 #### Step 12: Validate
 
-- Run all skill tests — mandatory
-- Compatibility report:
+Run all skill tests — mandatory. Compatibility report:
 
 ```
 Core updated: 0.5.0 → 0.8.0

@@ -1,3 +1,11 @@
+---
+name: add-discord
+description: Add Discord as a channel to NanoClaw. Can replace WhatsApp entirely or run alongside it. Guides through bot creation, token setup, and channel configuration.
+version: 1.0.0
+allowed-tools: Bash, Read, Write, Edit
+invocation: slash
+---
+
 # Add Discord Channel
 
 This skill adds Discord support to NanoClaw using the skills engine for deterministic code changes, then walks through interactive setup.
