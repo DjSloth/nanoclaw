@@ -1,211 +1,217 @@
 #!/usr/bin/env bash
 set -uo pipefail
 
-DB="/workspace/group/red-alert.db"
+WRITE_DB="/workspace/group/red-alert.db"
+
+# Use shared DB for reads if it has enough data (populated by main group's daily sync)
+if python3 -c "import sqlite3,sys; c=sqlite3.connect('/workspace/shared/red-alert.db'); n=c.execute('SELECT COUNT(*) FROM alert_groups').fetchone()[0]; sys.exit(0 if n>100 else 1)" 2>/dev/null; then
+  DB="/workspace/shared/red-alert.db"
+else
+  DB="$WRITE_DB"
+fi
 API_BASE="https://api.tzevaadom.co.il"
 CITIES_URL="https://www.tzevaadom.co.il/static/cities.json?v=10"
 
-# ── DB init ──────────────────────────────────────────────────────────────────
+# ── DB helpers (python3 only — no sqlite3 CLI needed) ────────────────────────
+
+db_query() {
+  python3 -c "
+import sqlite3, sys
+conn = sqlite3.connect('${DB}')
+rows = conn.execute(sys.argv[1], sys.argv[2:]).fetchall()
+for row in rows:
+    print('\t'.join('' if x is None else str(x) for x in row))
+conn.close()
+" "$@"
+}
 
 init_db() {
-  sqlite3 "$DB" <<'SQL'
-CREATE TABLE IF NOT EXISTS alert_groups (
-  id INTEGER PRIMARY KEY,
-  synced_at INTEGER
-);
+  python3 - "${WRITE_DB}" <<'PYEOF'
+import sqlite3, sys
+conn = sqlite3.connect(sys.argv[1])
+conn.executescript("""
+CREATE TABLE IF NOT EXISTS alert_groups (id INTEGER PRIMARY KEY, synced_at INTEGER);
 CREATE TABLE IF NOT EXISTS alerts (
-  group_id INTEGER,
-  time INTEGER,
-  city_he TEXT,
-  threat INTEGER,
-  is_drill INTEGER,
-  FOREIGN KEY(group_id) REFERENCES alert_groups(id)
+  group_id INTEGER, time INTEGER, city_he TEXT, threat INTEGER, is_drill INTEGER
 );
 CREATE TABLE IF NOT EXISTS cities (
-  name_he TEXT PRIMARY KEY,
-  name_en TEXT,
-  zone_he TEXT,
-  zone_en TEXT,
-  lat REAL,
-  lng REAL,
-  countdown INTEGER
-);
-CREATE TABLE IF NOT EXISTS meta (
-  key TEXT PRIMARY KEY,
-  value TEXT
+  name_he TEXT PRIMARY KEY, name_en TEXT, zone_he TEXT, zone_en TEXT,
+  area_id INTEGER, lat REAL, lng REAL, countdown INTEGER
 );
 CREATE INDEX IF NOT EXISTS idx_alerts_time   ON alerts(time);
 CREATE INDEX IF NOT EXISTS idx_alerts_city   ON alerts(city_he);
 CREATE INDEX IF NOT EXISTS idx_alerts_threat ON alerts(threat);
-SQL
+""")
+conn.commit()
+conn.close()
+PYEOF
 }
 
-# ── Helpers ──────────────────────────────────────────────────────────────────
-
-ts_to_date() {
-  # $1 = unix timestamp, output YYYY-MM-DD
-  python3 -c "import datetime; print(datetime.datetime.utcfromtimestamp($1).strftime('%Y-%m-%d'))"
-}
-
-ts_to_display() {
-  python3 -c "import datetime; print(datetime.datetime.utcfromtimestamp($1).strftime('%b %-d, %Y'))"
-}
-
-# Strip Hebrew nikud (diacritics U+05B0–U+05C7) and lowercase for fuzzy match
 normalize() {
   python3 -c "
-import sys, unicodedata
+import sys
 s = sys.argv[1].lower()
-# remove Hebrew points (nikud)
 s = ''.join(c for c in s if not (0x05B0 <= ord(c) <= 0x05C7))
 print(s)
 " "$1"
 }
 
-# Find city name_he by Hebrew or English input (fuzzy substring)
 resolve_city() {
   local q; q=$(normalize "$1")
-  sqlite3 "$DB" "SELECT name_he FROM cities WHERE lower(name_he) LIKE '%${q}%' OR lower(name_en) LIKE '%${q}%' LIMIT 1;"
-}
-
-# Find zone_en by Hebrew or English input
-resolve_zone() {
-  local q; q=$(normalize "$1")
-  # try exact zone match first, then substring
-  sqlite3 "$DB" "
-    SELECT zone_en FROM cities
-    WHERE lower(zone_he) LIKE '%${q}%' OR lower(zone_en) LIKE '%${q}%'
-    LIMIT 1;
-  "
+  db_query "SELECT name_he FROM cities WHERE lower(name_he) LIKE ? OR lower(name_en) LIKE ? LIMIT 1" "%${q}%" "%${q}%"
 }
 
 usage() {
   cat <<'EOF'
 Usage: red-alert <command> [args]
-
-Commands:
-  sync                          Fetch cities + all missing alert groups
-  recent [--hours N]            Alerts summary (default: last 24h)
-  city <name> [--period P]      Stats for a city (period: week|month|year|all)
-  area <name> [--period P]      Stats for a zone/area
+  sync                          Fetch all missing alert groups from API
+  recent [--hours N]            Recent alerts by area (default 24h)
+  city <name> [--period P]      City stats (period: week|month|year|all)
+  area <name> [--period P]      Area/zone stats
   date <YYYY-MM-DD>             All alerts on a specific date
   nationwide [--period P]       Israel-wide stats
 EOF
   exit 1
 }
 
-# ── sync ─────────────────────────────────────────────────────────────────────
+# ── sync ──────────────────────────────────────────────────────────────────────
 
 cmd_sync() {
   init_db
 
-  # 1. Fetch and upsert cities
   echo "Fetching cities..."
-  local cities_json
-  cities_json=$(curl -sf --max-time 20 "$CITIES_URL") || { echo "Error: failed to fetch cities"; exit 1; }
+  local cities_tmp; cities_tmp=$(mktemp)
+  curl -sf --max-time 30 "$CITIES_URL" -o "$cities_tmp" || { echo "Error: failed to fetch cities"; rm -f "$cities_tmp"; exit 1; }
 
-  python3 - "$DB" <<PYEOF
+  python3 - "${WRITE_DB}" "$cities_tmp" <<'PYEOF'
 import sys, json, sqlite3
-
-db_path = sys.argv[1]
-data = json.loads("""$(echo "$cities_json" | python3 -c "import sys,json; print(json.dumps(sys.stdin.read()))")""")
-
+db_path, cities_file = sys.argv[1], sys.argv[2]
+data = json.load(open(cities_file))
+areas  = data.get('areas', {})   # {"1": {"he":..,"en":..}, ...}
+cities = data.get('cities', {})  # {"cityHe": {"he":..,"en":..,"area":int,...}}
 conn = sqlite3.connect(db_path)
 c = conn.cursor()
-for city in data.get('cities', []):
-    c.execute("""
-        INSERT OR REPLACE INTO cities (name_he, name_en, zone_he, zone_en, lat, lng, countdown)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-    """, (
-        city.get('name', ''),
-        city.get('name_en', ''),
-        city.get('zone', ''),
-        city.get('zone_en', ''),
-        city.get('lat', 0),
-        city.get('lng', 0),
-        city.get('countdown', 0),
-    ))
+for name_he, city in cities.items():
+    area_id   = city.get('area')
+    area_info = areas.get(str(area_id), {}) if area_id else {}
+    c.execute("""INSERT OR REPLACE INTO cities
+        (name_he, name_en, zone_he, zone_en, area_id, lat, lng, countdown)
+        VALUES (?,?,?,?,?,?,?,?)""",
+        (name_he, city.get('en',''), area_info.get('he',''), area_info.get('en',''),
+         area_id, city.get('lat',0), city.get('lng',0), city.get('countdown',0)))
 conn.commit()
-print(f"Cities: {c.execute('SELECT COUNT(*) FROM cities').fetchone()[0]} total")
+print(f"Cities: {c.execute('SELECT COUNT(*) FROM cities').fetchone()[0]} loaded")
 conn.close()
 PYEOF
+  rm -f "$cities_tmp"
 
-  # 2. Find current max ID from live feed
   echo "Discovering latest alert group ID..."
-  local latest_json
-  latest_json=$(curl -sf --max-time 20 "${API_BASE}/alerts-history") || { echo "Error: failed to fetch latest alerts"; exit 1; }
+  local latest_json; latest_json=$(curl -sf --max-time 20 "${API_BASE}/alerts-history") \
+    || { echo "Error: failed to fetch latest"; exit 1; }
   local remote_max
-  remote_max=$(echo "$latest_json" | python3 -c "import sys,json; data=json.load(sys.stdin); print(max(g['id'] for g in data) if data else 0)")
-
+  remote_max=$(echo "$latest_json" | python3 -c \
+    "import sys,json; d=json.load(sys.stdin); print(max(g['id'] for g in d) if d else 0)")
   local local_max
-  local_max=$(sqlite3 "$DB" "SELECT COALESCE(MAX(id), 0) FROM alert_groups;")
+  local_max=$(db_query "SELECT COALESCE(MAX(id),0) FROM alert_groups")
+  local_max="${local_max:-0}"
 
   if [ "$local_max" -ge "$remote_max" ]; then
     echo "✅ Already up to date (max ID: ${remote_max})"
     return 0
   fi
 
-  local missing=$((remote_max - local_max))
-  echo "Syncing ${missing} new groups (IDs ${local_max+1}–${remote_max})..."
-
-  # 3. Build list of missing IDs
-  local id_list
-  id_list=$(seq $((local_max + 1)) "$remote_max")
-
-  # 4. Parallel download with xargs -P 20, batched
-  local tmp_dir
-  tmp_dir=$(mktemp -d)
-
-  echo "$id_list" | xargs -P 20 -I{} bash -c '
-    id={}
-    out="'"$tmp_dir"'/$id.json"
-    curl -sf --max-time 10 "'"$API_BASE"'/alerts-history/id/$id" -o "$out" 2>/dev/null || echo "{}" > "$out"
-    sleep 0.1
-  '
-
-  # 5. Insert into SQLite
-  echo "Inserting into database..."
-  python3 - "$DB" "$tmp_dir" "$local_max" "$remote_max" <<'PYEOF'
-import sys, json, os, sqlite3
-
-db_path, tmp_dir, local_max, remote_max = sys.argv[1], sys.argv[2], int(sys.argv[3]), int(sys.argv[4])
+  # Build list of IDs to fetch: new IDs beyond local_max + any gaps in existing range
+  # For fresh DBs (local_max==0), only start from recent ~1200 IDs (Op Roaring Lion / Feb 2026)
+  local id_file; id_file=$(mktemp)
+  python3 - "${DB}" "$local_max" "$remote_max" "$id_file" <<'PYEOF'
+import sys, sqlite3
+db_path, local_max, remote_max, id_file = sys.argv[1], int(sys.argv[2]), int(sys.argv[3]), sys.argv[4]
 conn = sqlite3.connect(db_path)
-c = conn.cursor()
-
-inserted_groups = 0
-inserted_alerts = 0
-now = int(__import__('time').time())
-
-for gid in range(local_max + 1, remote_max + 1):
-    path = os.path.join(tmp_dir, f"{gid}.json")
-    if not os.path.exists(path):
-        continue
-    try:
-        data = json.loads(open(path).read())
-    except Exception:
-        continue
-
-    group_id = data.get('id', gid)
-    c.execute("INSERT OR IGNORE INTO alert_groups (id, synced_at) VALUES (?, ?)", (group_id, now))
-    inserted_groups += 1
-
-    for alert in data.get('alerts', []):
-        if alert.get('isDrill'):
-            continue
-        for city in alert.get('cities', []):
-            c.execute("""
-                INSERT INTO alerts (group_id, time, city_he, threat, is_drill)
-                VALUES (?, ?, ?, ?, ?)
-            """, (group_id, alert['time'], city, alert.get('threat', 0), 0))
-            inserted_alerts += 1
-
-conn.commit()
-total = c.execute("SELECT COUNT(*) FROM alert_groups").fetchone()[0]
-print(f"✅ Synced {inserted_groups} new groups, {inserted_alerts} alert records (total groups: {total})")
+synced = set(r[0] for r in conn.execute('SELECT id FROM alert_groups').fetchall())
 conn.close()
+# Fresh DB: only fetch recent ~1200 IDs (covers Op Roaring Lion from Feb 2026)
+start_id = max(1, remote_max - 1200) if local_max == 0 else 1
+missing = [i for i in range(start_id, remote_max + 1) if i not in synced]
+with open(id_file, 'w') as f:
+    f.write('\n'.join(str(i) for i in missing))
+note = f"fresh DB from ID {start_id}" if local_max == 0 else f"{len(missing)-max(0,remote_max-local_max)} gaps"
+print(f"IDs to fetch: {len(missing)} ({note} + {max(0,remote_max-local_max)} new)")
 PYEOF
 
-  rm -rf "$tmp_dir"
+  local batch_size=200
+
+  # Process in batches of batch_size
+  local total_ids; total_ids=$(wc -l < "$id_file")
+  local batch_num=0
+  while true; do
+    local offset=$((batch_num * batch_size))
+    local batch_ids; batch_ids=$(tail -n +"$((offset+1))" "$id_file" | head -n "$batch_size")
+    [ -z "$batch_ids" ] && break
+    local start; start=$(echo "$batch_ids" | head -1)
+    local end; end=$(echo "$batch_ids" | tail -1)
+    batch_num=$((batch_num + 1))
+
+    local tmp_dir; tmp_dir=$(mktemp -d)
+
+    # Download batch: concurrency 5, 3 retries, 1s backoff
+    echo "$batch_ids" | xargs -P 5 -I__ID__ bash -c '
+      id=__ID__
+      out="'"$tmp_dir"'/$id.json"
+      for attempt in 1 2 3; do
+        if curl -sf --max-time 15 "'"$API_BASE"'/alerts-history/id/$id" -o "$out" 2>/dev/null; then
+          break
+        fi
+        sleep 1
+      done
+    '
+
+    # Write batch IDs to a temp file and pass to inserter (avoids pipe+heredoc stdin conflict)
+    local ids_tmp; ids_tmp=$(mktemp)
+    echo "$batch_ids" > "$ids_tmp"
+    python3 - "${WRITE_DB}" "$tmp_dir" "$ids_tmp" <<'PYEOF'
+import sys, json, os, sqlite3, time
+db_path, tmp_dir, ids_file = sys.argv[1], sys.argv[2], sys.argv[3]
+ids = [int(line.strip()) for line in open(ids_file) if line.strip()]
+conn = sqlite3.connect(db_path)
+c = conn.cursor()
+now = int(time.time())
+ig = ia = 0
+for gid in ids:
+    path = os.path.join(tmp_dir, f"{gid}.json")
+    if not os.path.exists(path): continue
+    try:
+        data = json.load(open(path))
+    except Exception:
+        continue
+    group_id = data.get('id')
+    if not group_id: continue   # download failed, will retry next sync
+    c.execute("INSERT OR IGNORE INTO alert_groups (id, synced_at) VALUES (?,?)", (group_id, now))
+    ig += 1
+    for alert in data.get('alerts', []):
+        if alert.get('isDrill'): continue
+        for city in alert.get('cities', []):
+            c.execute("INSERT INTO alerts (group_id,time,city_he,threat,is_drill) VALUES (?,?,?,?,?)",
+                      (group_id, alert['time'], city, alert.get('threat',0), 0))
+            ia += 1
+conn.commit()
+conn.close()
+if ids:
+    print(f"  IDs {ids[0]}–{ids[-1]}: {ig} groups, {ia} records")
+PYEOF
+
+    rm -rf "$tmp_dir"
+    rm -f "$ids_tmp"
+  done
+
+  rm -f "$id_file"
+  local tg; tg=$(db_query "SELECT COUNT(*) FROM alert_groups")
+  local ta; ta=$(db_query "SELECT COUNT(*) FROM alerts")
+  echo "✅ Sync complete — ${tg} groups, ${ta} alert records"
+
+  # If we're the main group (writable shared path exists), publish to shared mount
+  if [ -w "/workspace/extra/shared" ] 2>/dev/null; then
+    cp "${WRITE_DB}" "/workspace/extra/shared/red-alert.db" && echo "Published to shared DB"
+  fi
 }
 
 # ── recent ────────────────────────────────────────────────────────────────────
@@ -215,56 +221,36 @@ cmd_recent() {
   while [[ $# -gt 0 ]]; do
     case "$1" in --hours) hours="$2"; shift 2 ;; *) shift ;; esac
   done
-
   init_db
-  local since
-  since=$(python3 -c "import time; print(int(time.time()) - ${hours}*3600)")
-
-  python3 - "$DB" "$since" "$hours" <<'PYEOF'
+  local since; since=$(python3 -c "import time; print(int(time.time()) - ${hours}*3600)")
+  python3 - "${DB}" "$since" "$hours" <<'PYEOF'
 import sys, sqlite3
 from collections import defaultdict
-
 db_path, since, hours = sys.argv[1], int(sys.argv[2]), sys.argv[3]
 conn = sqlite3.connect(db_path)
-c = conn.cursor()
-
-rows = c.execute("""
-    SELECT a.city_he, ci.name_en, ci.zone_en, a.threat
-    FROM alerts a
-    LEFT JOIN cities ci ON ci.name_he = a.city_he
-    WHERE a.time >= ? AND a.is_drill = 0
-    ORDER BY a.time DESC
+rows = conn.execute("""
+    SELECT a.city_he, ci.name_en, ci.zone_en, a.threat FROM alerts a
+    LEFT JOIN cities ci ON ci.name_he=a.city_he
+    WHERE a.time>=? AND a.is_drill=0 ORDER BY a.time DESC
 """, (since,)).fetchall()
-
 if not rows:
-    print(f"No alerts in the last {hours} hours.")
-    sys.exit(0)
-
-# Group by zone
+    print(f"No alerts in the last {hours} hours."); sys.exit(0)
 zones = defaultdict(lambda: {'cities': defaultdict(int), 'threats': defaultdict(int)})
 for city_he, name_en, zone_en, threat in rows:
-    label = name_en or city_he
-    zone = zone_en or 'Unknown'
-    zones[zone]['cities'][label] += 1
-    zones[zone]['threats'][threat] += 1
-
-total = len(rows)
-city_count = len(set(r[0] for r in rows))
-
+    z = zone_en or 'Unknown'
+    zones[z]['cities'][name_en or city_he] += 1
+    zones[z]['threats'][threat] += 1
 print(f"🚨 *Red Alerts — Last {hours}h*\n")
 for zone, data in sorted(zones.items(), key=lambda x: -sum(x[1]['cities'].values())):
-    zone_total = sum(data['cities'].values())
-    threat_parts = []
-    if data['threats'].get(0, 0): threat_parts.append(f"rockets ×{data['threats'][0]}")
-    if data['threats'].get(5, 0): threat_parts.append(f"aircraft/anti-tank ×{data['threats'][5]}")
-    threat_str = f" ({', '.join(threat_parts)})" if threat_parts else ""
-    print(f"*{zone}*: {zone_total} alerts{threat_str}")
+    zt = sum(data['cities'].values())
+    parts = []
+    if data['threats'].get(0): parts.append(f"rockets ×{data['threats'][0]}")
+    if data['threats'].get(5): parts.append(f"aircraft ×{data['threats'][5]}")
+    print(f"*{zone}*: {zt}" + (f" ({', '.join(parts)})" if parts else ""))
     for city, cnt in sorted(data['cities'].items(), key=lambda x: -x[1])[:7]:
-        mark = f" ×{cnt}" if cnt > 1 else ""
-        print(f"  • {city}{mark}")
+        print(f"  • {city}" + (f" ×{cnt}" if cnt > 1 else ""))
     print()
-
-print(f"Total: {total} alerts across {city_count} cities")
+print(f"Total: {len(rows)} alerts across {len(set(r[0] for r in rows))} cities")
 conn.close()
 PYEOF
 }
@@ -273,115 +259,54 @@ PYEOF
 
 cmd_city() {
   local name="${1:?Usage: red-alert city <name> [--period week|month|year|all]}"
-  shift
-  local period="all"
+  shift; local period="all"
   while [[ $# -gt 0 ]]; do
     case "$1" in --period) period="$2"; shift 2 ;; *) shift ;; esac
   done
-
   init_db
-
-  local city_he
-  city_he=$(resolve_city "$name")
-  if [ -z "$city_he" ]; then
-    echo "City not found: ${name}"
-    echo "Tip: run 'red-alert sync' first, then try Hebrew or English name"
-    exit 1
-  fi
-
-  python3 - "$DB" "$city_he" "$period" <<'PYEOF'
-import sys, sqlite3
-import datetime
-
+  local city_he; city_he=$(resolve_city "$name")
+  if [ -z "$city_he" ]; then echo "City not found: ${name}"; exit 1; fi
+  python3 - "${DB}" "$city_he" "$period" <<'PYEOF'
+import sys, sqlite3, datetime
+from collections import Counter
 db_path, city_he, period = sys.argv[1], sys.argv[2], sys.argv[3]
 conn = sqlite3.connect(db_path)
 c = conn.cursor()
-
-row = c.execute("SELECT name_en, zone_he, zone_en FROM cities WHERE name_he = ?", (city_he,)).fetchone()
-name_en = row[0] if row else ''
-zone_he = row[1] if row else ''
-zone_en = row[2] if row else ''
-
+row = c.execute("SELECT name_en,zone_he,zone_en FROM cities WHERE name_he=?", (city_he,)).fetchone()
+name_en, zone_he, zone_en = row if row else ('','','')
 now = datetime.datetime.utcnow()
-
-def period_since(p):
-    if p == 'week':   return int((now - datetime.timedelta(days=7)).timestamp())
-    if p == 'month':  return int(datetime.datetime(now.year, now.month, 1).timestamp())
-    if p == 'year':   return int(datetime.datetime(now.year, 1, 1).timestamp())
-    return 0  # all
-
-since = period_since(period)
-
-def stats(since_ts):
-    rows = c.execute("""
-        SELECT time, threat FROM alerts
-        WHERE city_he = ? AND is_drill = 0 AND time >= ?
-        ORDER BY time
-    """, (city_he, since_ts)).fetchall()
-    return rows
-
-all_rows = stats(0)
-period_rows = stats(since) if period != 'all' else all_rows
-
-if not all_rows:
-    print(f"No alerts found for {name_en or city_he}")
-    sys.exit(0)
-
-# --- All-time stats ---
-first_ts = all_rows[0][0]
-last_ts = all_rows[-1][0]
-total = len(all_rows)
-rockets = sum(1 for r in all_rows if r[1] == 0)
-aircraft = sum(1 for r in all_rows if r[1] == 5)
-
-# Worst day
-from collections import Counter
-day_counts = Counter(datetime.datetime.utcfromtimestamp(r[0]).strftime('%Y-%m-%d') for r in all_rows)
-worst_day, worst_day_count = day_counts.most_common(1)[0]
-
-month_counts = Counter(datetime.datetime.utcfromtimestamp(r[0]).strftime('%Y-%m') for r in all_rows)
-worst_month, worst_month_count = month_counts.most_common(1)[0]
-
-first_date = datetime.datetime.utcfromtimestamp(first_ts).strftime('%b %Y')
-last_date  = datetime.datetime.utcfromtimestamp(last_ts).strftime('%b %-d, %Y')
-worst_day_disp = datetime.datetime.strptime(worst_day, '%Y-%m-%d').strftime('%b %-d, %Y')
-worst_month_disp = datetime.datetime.strptime(worst_month + '-01', '%Y-%m-%d').strftime('%b %Y')
-
+def since(p):
+    if p=='week':  return int((now-datetime.timedelta(days=7)).timestamp())
+    if p=='month': return int(datetime.datetime(now.year,now.month,1).timestamp())
+    if p=='year':  return int(datetime.datetime(now.year,1,1).timestamp())
+    return 0
+all_rows = c.execute("SELECT time,threat FROM alerts WHERE city_he=? AND is_drill=0 ORDER BY time",(city_he,)).fetchall()
+if not all_rows: print(f"No alerts found for {name_en or city_he}"); sys.exit(0)
+p_rows = [r for r in all_rows if r[0]>=since(period)] if period!='all' else all_rows
+fd = datetime.datetime.utcfromtimestamp(all_rows[0][0])
+ld = datetime.datetime.utcfromtimestamp(all_rows[-1][0])
+dc = Counter(datetime.datetime.utcfromtimestamp(r[0]).strftime('%Y-%m-%d') for r in all_rows)
+mc = Counter(datetime.datetime.utcfromtimestamp(r[0]).strftime('%Y-%m') for r in all_rows)
+wd,wdc = dc.most_common(1)[0]; wm,wmc = mc.most_common(1)[0]
 label = f"{name_en} / {city_he}" if name_en else city_he
 print(f"📍 *{label}*")
-if zone_en:
-    print(f"Zone: {zone_en} / {zone_he}")
+if zone_en: print(f"Zone: {zone_en} / {zone_he}")
 print()
-
-period_label = {'week': 'Last 7 days', 'month': f'This month ({now.strftime("%b %Y")})',
-                'year': f'This year ({now.year})', 'all': f'All time ({first_date}–{last_date})'}[period]
-
 if period == 'all':
-    print(f"*All time* ({first_date}–{last_date}):")
-    print(f"• Total alerts: {total}")
-    print(f"• Rockets: {rockets} · Aircraft: {aircraft}")
-    print(f"• Worst day: {worst_day_disp} ({worst_day_count} alerts)")
-    print(f"• Worst month: {worst_month_disp} ({worst_month_count} alerts)")
-    print(f"• Last alert: {last_date}")
+    r = sum(1 for x in all_rows if x[1]==0); a = sum(1 for x in all_rows if x[1]==5)
+    print(f"*All time* ({fd.strftime('%b %Y')}–{ld.strftime('%b %Y')}):")
+    print(f"• Total: {len(all_rows)}  · Rockets: {r} · Aircraft: {a}")
+    print(f"• Worst day: {datetime.datetime.strptime(wd,'%Y-%m-%d').strftime('%b %-d, %Y')} ({wdc})")
+    print(f"• Worst month: {datetime.datetime.strptime(wm+'-01','%Y-%m-%d').strftime('%b %Y')} ({wmc})")
+    print(f"• Last alert: {ld.strftime('%b %-d, %Y')}")
+    yr = [x for x in all_rows if x[0]>=since('year')]
+    mo = [x for x in all_rows if x[0]>=since('month')]
+    print(); print(f"This year ({now.year}): {len(yr)}  · This month: {len(mo)}")
 else:
-    ptotal = len(period_rows)
-    prockets = sum(1 for r in period_rows if r[1] == 0)
-    paircraft = sum(1 for r in period_rows if r[1] == 5)
-    print(f"*{period_label}*:")
-    print(f"• Total alerts: {ptotal}")
-    if ptotal:
-        print(f"• Rockets: {prockets} · Aircraft: {paircraft}")
-    print()
-    print(f"*All time* ({first_date}–{last_date}): {total} total")
-
-# Year / month quick stats at bottom for all-time view
-if period == 'all':
-    year_rows = stats(int(datetime.datetime(now.year, 1, 1).timestamp()))
-    month_rows = stats(int(datetime.datetime(now.year, now.month, 1).timestamp()))
-    print()
-    print(f"This year ({now.year}): {len(year_rows)} alerts")
-    print(f"This month: {len(month_rows)} alerts")
-
+    labels = {'week':'Last 7 days','month':f'This month ({now.strftime("%b %Y")})','year':f'This year ({now.year})'}
+    pr=sum(1 for x in p_rows if x[1]==0); pa=sum(1 for x in p_rows if x[1]==5)
+    print(f"*{labels[period]}*: {len(p_rows)} alerts (rockets: {pr} · aircraft: {pa})")
+    print(f"\n*All time*: {len(all_rows)} total · Last: {ld.strftime('%b %-d, %Y')}")
 conn.close()
 PYEOF
 }
@@ -390,103 +315,53 @@ PYEOF
 
 cmd_area() {
   local name="${1:?Usage: red-alert area <name> [--period week|month|year|all]}"
-  shift
-  local period="all"
+  shift; local period="all"
   while [[ $# -gt 0 ]]; do
     case "$1" in --period) period="$2"; shift 2 ;; *) shift ;; esac
   done
-
   init_db
-
-  python3 - "$DB" "$name" "$period" <<'PYEOF'
+  python3 - "${DB}" "$name" "$period" <<'PYEOF'
 import sys, sqlite3, datetime
 from collections import Counter
-
 db_path, query, period = sys.argv[1], sys.argv[2], sys.argv[3]
 conn = sqlite3.connect(db_path)
 c = conn.cursor()
-
 q = query.lower()
-zone_row = c.execute("""
-    SELECT zone_he, zone_en FROM cities
-    WHERE lower(zone_he) LIKE ? OR lower(zone_en) LIKE ?
-    LIMIT 1
-""", (f'%{q}%', f'%{q}%')).fetchone()
-
-if not zone_row:
-    print(f"Area not found: {query}")
-    print("Tip: try Hebrew or English zone name")
-    sys.exit(1)
-
-zone_he, zone_en = zone_row
+zr = c.execute("SELECT zone_he,zone_en FROM cities WHERE lower(zone_he) LIKE ? OR lower(zone_en) LIKE ? LIMIT 1",
+               (f'%{q}%',f'%{q}%')).fetchone()
+if not zr: print(f"Area not found: {query}"); sys.exit(1)
+zone_he, zone_en = zr
 label = f"{zone_en} / {zone_he}" if zone_en else zone_he
-
 now = datetime.datetime.utcnow()
-def period_since(p):
-    if p == 'week':   return int((now - datetime.timedelta(days=7)).timestamp())
-    if p == 'month':  return int(datetime.datetime(now.year, now.month, 1).timestamp())
-    if p == 'year':   return int(datetime.datetime(now.year, 1, 1).timestamp())
+def since(p):
+    if p=='week':  return int((now-datetime.timedelta(days=7)).timestamp())
+    if p=='month': return int(datetime.datetime(now.year,now.month,1).timestamp())
+    if p=='year':  return int(datetime.datetime(now.year,1,1).timestamp())
     return 0
-
-since = period_since(period)
-
-rows = c.execute("""
-    SELECT a.city_he, ci.name_en, a.time, a.threat
-    FROM alerts a
-    LEFT JOIN cities ci ON ci.name_he = a.city_he
-    WHERE ci.zone_he = ? AND a.is_drill = 0 AND a.time >= ?
-    ORDER BY a.time
-""", (zone_he, since)).fetchall()
-
 all_rows = c.execute("""
-    SELECT a.city_he, ci.name_en, a.time, a.threat
-    FROM alerts a
-    LEFT JOIN cities ci ON ci.name_he = a.city_he
-    WHERE ci.zone_he = ? AND a.is_drill = 0
-    ORDER BY a.time
+    SELECT a.city_he, ci.name_en, a.time, a.threat FROM alerts a
+    LEFT JOIN cities ci ON ci.name_he=a.city_he
+    WHERE ci.zone_he=? AND a.is_drill=0 ORDER BY a.time
 """, (zone_he,)).fetchall()
-
-if not all_rows:
-    print(f"No alerts found for area: {label}")
-    sys.exit(0)
-
-total_all = len(all_rows)
-city_count = len(set(r[0] for r in all_rows))
-
-day_counts = Counter(datetime.datetime.utcfromtimestamp(r[2]).strftime('%Y-%m-%d') for r in all_rows)
-peak_day, peak_day_count = day_counts.most_common(1)[0]
-peak_day_disp = datetime.datetime.strptime(peak_day, '%Y-%m-%d').strftime('%b %-d, %Y')
-
-city_totals = Counter()
-for r in all_rows:
-    city_totals[r[1] or r[0]] += 1
-
+if not all_rows: print(f"No alerts for: {label}"); sys.exit(0)
+p_rows = [r for r in all_rows if r[2]>=since(period)] if period!='all' else all_rows
+dc = Counter(datetime.datetime.utcfromtimestamp(r[2]).strftime('%Y-%m-%d') for r in all_rows)
+pd,pdc = dc.most_common(1)[0]
+ct = Counter(r[1] or r[0] for r in all_rows)
 print(f"📍 *{label}*\n")
-
 if period == 'all':
-    print(f"*All time*: {total_all} alerts across {city_count} cities")
-    print(f"Top cities:")
-    for city, cnt in city_totals.most_common(7):
-        print(f"  • {city}: {cnt}")
-    year_rows = [r for r in all_rows if r[2] >= period_since('year')]
-    month_rows = [r for r in all_rows if r[2] >= period_since('month')]
-    print(f"\nPeak day: {peak_day_disp} ({peak_day_count} alerts)")
-    print(f"This year ({now.year}): {len(year_rows)} alerts")
-    print(f"This month: {len(month_rows)} alerts")
+    print(f"*All time*: {len(all_rows)} alerts across {len(set(r[0] for r in all_rows))} cities")
+    print("Top cities:")
+    for city, cnt in ct.most_common(7): print(f"  • {city}: {cnt}")
+    yr=[r for r in all_rows if r[2]>=since('year')]; mo=[r for r in all_rows if r[2]>=since('month')]
+    print(f"\nPeak day: {datetime.datetime.strptime(pd,'%Y-%m-%d').strftime('%b %-d, %Y')} ({pdc})")
+    print(f"This year ({now.year}): {len(yr)}  · This month: {len(mo)}")
 else:
-    period_labels = {'week': 'Last 7 days', 'month': f'This month',
-                     'year': f'This year ({now.year})'}
-    ptotal = len(rows)
-    pcities = len(set(r[0] for r in rows))
-    period_city_totals = Counter(r[1] or r[0] for r in rows)
-    print(f"*{period_labels[period]}*: {ptotal} alerts across {pcities} cities")
-    if period_city_totals:
-        print("Top cities:")
-        for city, cnt in period_city_totals.most_common(7):
-            print(f"  • {city}: {cnt}")
-    print(f"\n*All time*: {total_all} alerts across {city_count} cities")
-    print(f"Peak day: {peak_day_disp} ({peak_day_count} alerts)")
-
+    labels = {'week':'Last 7 days','month':'This month','year':f'This year ({now.year})'}
+    pc = Counter(r[1] or r[0] for r in p_rows)
+    print(f"*{labels[period]}*: {len(p_rows)} alerts across {len(set(r[0] for r in p_rows))} cities")
+    for city, cnt in pc.most_common(7): print(f"  • {city}: {cnt}")
+    print(f"\n*All time*: {len(all_rows)} · Peak: {datetime.datetime.strptime(pd,'%Y-%m-%d').strftime('%b %-d, %Y')} ({pdc})")
 conn.close()
 PYEOF
 }
@@ -496,68 +371,32 @@ PYEOF
 cmd_date() {
   local date_str="${1:?Usage: red-alert date <YYYY-MM-DD>}"
   init_db
-
-  python3 - "$DB" "$date_str" <<'PYEOF'
+  python3 - "${DB}" "$date_str" <<'PYEOF'
 import sys, sqlite3, datetime
 from collections import Counter, defaultdict
-
 db_path, date_str = sys.argv[1], sys.argv[2]
-
-try:
-    d = datetime.datetime.strptime(date_str, '%Y-%m-%d')
-except ValueError:
-    print(f"Invalid date: {date_str} (use YYYY-MM-DD)")
-    sys.exit(1)
-
-ts_start = int(d.timestamp())
-ts_end   = int((d + datetime.timedelta(days=1)).timestamp())
-
+try: d = datetime.datetime.strptime(date_str, '%Y-%m-%d')
+except ValueError: print(f"Invalid date: {date_str}"); sys.exit(1)
+ts0=int(d.timestamp()); ts1=int((d+datetime.timedelta(days=1)).timestamp())
 conn = sqlite3.connect(db_path)
-c = conn.cursor()
-
-rows = c.execute("""
-    SELECT a.city_he, ci.name_en, ci.zone_en, a.time, a.threat
-    FROM alerts a
-    LEFT JOIN cities ci ON ci.name_he = a.city_he
-    WHERE a.time >= ? AND a.time < ? AND a.is_drill = 0
-    ORDER BY a.time
-""", (ts_start, ts_end)).fetchall()
-
-if not rows:
-    print(f"No alerts found for {date_str}")
-    sys.exit(0)
-
-total = len(rows)
-rockets  = sum(1 for r in rows if r[4] == 0)
-aircraft = sum(1 for r in rows if r[4] == 5)
-city_count = len(set(r[0] for r in rows))
-
-# By zone
-zone_counts = Counter(r[2] or 'Unknown' for r in rows)
-
-# Timeline (3h buckets)
-buckets = defaultdict(int)
-for r in rows:
-    hour = datetime.datetime.utcfromtimestamp(r[3]).hour
-    bucket = (hour // 3) * 3
-    buckets[bucket] += 1
-
-disp = d.strftime('%b %-d, %Y')
-print(f"📅 *{disp}*\n")
-print(f"Total: {total} alerts across {city_count} cities")
-print(f"Rockets: {rockets} · Aircraft: {aircraft}")
-
+rows = conn.execute("""
+    SELECT a.city_he, ci.name_en, ci.zone_en, a.time, a.threat FROM alerts a
+    LEFT JOIN cities ci ON ci.name_he=a.city_he
+    WHERE a.time>=? AND a.time<? AND a.is_drill=0 ORDER BY a.time
+""", (ts0,ts1)).fetchall()
+if not rows: print(f"No alerts on {date_str}"); sys.exit(0)
+r=sum(1 for x in rows if x[4]==0); a=sum(1 for x in rows if x[4]==5)
+zc=Counter(x[2] or 'Unknown' for x in rows)
+bk=defaultdict(int)
+for x in rows: bk[(datetime.datetime.utcfromtimestamp(x[3]).hour//3)*3]+=1
+print(f"📅 *{d.strftime('%b %-d, %Y')}*\n")
+print(f"Total: {len(rows)} alerts across {len(set(x[0] for x in rows))} cities")
+print(f"Rockets: {r} · Aircraft: {a}")
 print(f"\n*Most hit areas:*")
-for zone, cnt in zone_counts.most_common(7):
-    print(f"  • {zone}: {cnt}")
-
-max_cnt = max(buckets.values()) if buckets else 1
-print(f"\n*Timeline (peak hours, UTC):*")
-for b in sorted(buckets):
-    cnt = buckets[b]
-    bar = '█' * max(1, round(cnt * 12 / max_cnt))
-    print(f"  {b:02d}:00–{b+3:02d}:00 → {cnt} alerts  {bar}")
-
+for zone, cnt in zc.most_common(7): print(f"  • {zone}: {cnt}")
+mx=max(bk.values())
+print(f"\n*Timeline (3h UTC):*")
+for b in sorted(bk): print(f"  {b:02d}:00–{b+3:02d}:00 → {bk[b]}  {'█'*max(1,round(bk[b]*12/mx))}")
 conn.close()
 PYEOF
 }
@@ -569,93 +408,47 @@ cmd_nationwide() {
   while [[ $# -gt 0 ]]; do
     case "$1" in --period) period="$2"; shift 2 ;; *) shift ;; esac
   done
-
   init_db
-
-  python3 - "$DB" "$period" <<'PYEOF'
+  python3 - "${DB}" "$period" <<'PYEOF'
 import sys, sqlite3, datetime
 from collections import Counter
-
 db_path, period = sys.argv[1], sys.argv[2]
 conn = sqlite3.connect(db_path)
 c = conn.cursor()
-
 now = datetime.datetime.utcnow()
-def period_since(p):
-    if p == 'week':   return int((now - datetime.timedelta(days=7)).timestamp())
-    if p == 'month':  return int(datetime.datetime(now.year, now.month, 1).timestamp())
-    if p == 'year':   return int(datetime.datetime(now.year, 1, 1).timestamp())
+def since(p):
+    if p=='week':  return int((now-datetime.timedelta(days=7)).timestamp())
+    if p=='month': return int(datetime.datetime(now.year,now.month,1).timestamp())
+    if p=='year':  return int(datetime.datetime(now.year,1,1).timestamp())
     return 0
-
-all_rows = c.execute("""
-    SELECT a.time, a.city_he, a.threat
-    FROM alerts a WHERE a.is_drill = 0 ORDER BY a.time
-""").fetchall()
-
-if not all_rows:
-    print("No data. Run 'red-alert sync' first.")
-    sys.exit(0)
-
-total_cities = c.execute("SELECT COUNT(*) FROM cities").fetchone()[0]
-
-first_ts = all_rows[0][0]
-last_ts  = all_rows[-1][0]
-first_date = datetime.datetime.utcfromtimestamp(first_ts).strftime('%b %Y')
-last_date  = datetime.datetime.utcfromtimestamp(last_ts).strftime('%b %Y')
-
-def stats(rows):
-    total = len(rows)
-    rockets  = sum(1 for r in rows if r[2] == 0)
-    aircraft = sum(1 for r in rows if r[2] == 5)
-    cities   = len(set(r[1] for r in rows))
-    return total, rockets, aircraft, cities
-
-total, rockets, aircraft, cities = stats(all_rows)
-
-day_counts   = Counter(datetime.datetime.utcfromtimestamp(r[0]).strftime('%Y-%m-%d') for r in all_rows)
-month_counts = Counter(datetime.datetime.utcfromtimestamp(r[0]).strftime('%Y-%m') for r in all_rows)
-peak_day, peak_day_cnt     = day_counts.most_common(1)[0]
-peak_month, peak_month_cnt = month_counts.most_common(1)[0]
-peak_day_disp   = datetime.datetime.strptime(peak_day, '%Y-%m-%d').strftime('%b %-d, %Y')
-peak_month_disp = datetime.datetime.strptime(peak_month + '-01', '%Y-%m-%d').strftime('%b %Y')
-
-year_rows  = [r for r in all_rows if r[0] >= period_since('year')]
-month_rows = [r for r in all_rows if r[0] >= period_since('month')]
-week_rows  = [r for r in all_rows if r[0] >= period_since('week')]
-
-since = period_since(period)
-
+rows = c.execute("SELECT time,city_he,threat FROM alerts WHERE is_drill=0 ORDER BY time").fetchall()
+if not rows: print("No data. Run 'red-alert sync' first."); sys.exit(0)
+tc = c.execute("SELECT COUNT(*) FROM cities").fetchone()[0]
+fd=datetime.datetime.utcfromtimestamp(rows[0][0]); ld=datetime.datetime.utcfromtimestamp(rows[-1][0])
+def stats(rs): return len(rs),sum(1 for r in rs if r[2]==0),sum(1 for r in rs if r[2]==5),len(set(r[1] for r in rs))
+total,rockets,aircraft,cities=stats(rows)
+dc=Counter(datetime.datetime.utcfromtimestamp(r[0]).strftime('%Y-%m-%d') for r in rows)
+mc=Counter(datetime.datetime.utcfromtimestamp(r[0]).strftime('%Y-%m') for r in rows)
+pd,pdc=dc.most_common(1)[0]; pm,pmc=mc.most_common(1)[0]
+yr=[r for r in rows if r[0]>=since('year')]; mo=[r for r in rows if r[0]>=since('month')]; wk=[r for r in rows if r[0]>=since('week')]
 print(f"🇮🇱 *Israel — Red Alert Stats*\n")
-
 if period != 'all':
-    filtered = [r for r in all_rows if r[0] >= since]
-    ft, fr, fa, fc = stats(filtered)
-    period_labels = {'week': 'Last 7 days', 'month': f'This month ({now.strftime("%b %Y")})',
-                     'year': f'This year ({now.year})'}
-    print(f"*{period_labels[period]}*:")
-    print(f"  Total: {ft} alerts across {fc} cities")
-    print(f"  Rockets: {fr} · Aircraft: {fa}")
-    print()
-print(f"*All time* ({first_date}–{last_date}):")
-print(f"  Total: {total} alerts")
-print(f"  Rockets: {rockets} · Aircraft: {aircraft}")
-print(f"  Cities hit: {cities} of {total_cities}")
-print(f"  Peak day: {peak_day_disp} ({peak_day_cnt})")
-print(f"  Peak month: {peak_month_disp} ({peak_month_cnt})")
-print()
-print(f"This year ({now.year}): {len(year_rows)} alerts")
-print(f"This month: {len(month_rows)} alerts")
-print(f"Last 7 days: {len(week_rows)} alerts")
-
+    fl=[r for r in rows if r[0]>=since(period)]; ft,fr,fa,fc=stats(fl)
+    labels={'week':'Last 7 days','month':f'This month ({now.strftime("%b %Y")})','year':f'This year ({now.year})'}
+    print(f"*{labels[period]}*: {ft} alerts across {fc} cities  (rockets: {fr} · aircraft: {fa})\n")
+print(f"*All time* ({fd.strftime('%b %Y')}–{ld.strftime('%b %Y')}):")
+print(f"  Total: {total} · Rockets: {rockets} · Aircraft: {aircraft}")
+print(f"  Cities hit: {cities} of {tc}")
+print(f"  Peak day: {datetime.datetime.strptime(pd,'%Y-%m-%d').strftime('%b %-d, %Y')} ({pdc})")
+print(f"  Peak month: {datetime.datetime.strptime(pm+'-01','%Y-%m-%d').strftime('%b %Y')} ({pmc})")
+print(f"\nThis year ({now.year}): {len(yr)}  · This month: {len(mo)}  · Last 7 days: {len(wk)}")
 conn.close()
 PYEOF
 }
 
 # ── main ──────────────────────────────────────────────────────────────────────
 
-command="${1:-}"
-shift || true
-
+command="${1:-}"; shift || true
 case "$command" in
   sync)       cmd_sync "$@" ;;
   recent)     cmd_recent "$@" ;;

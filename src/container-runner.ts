@@ -153,7 +153,7 @@ function buildVolumeMounts(
   //
   // Main group: symlink skill dirs to /workspace/extra/skills/{skillDir} so
   // edits to the writable container/skills mount are live immediately.
-  // Other groups: copy as before (they don't have the writable mount).
+  // Other groups: skills are mounted read-only at /home/node/.claude/skills/ (see below).
   const skillsSrc = path.join(process.cwd(), 'container', 'skills');
   const skillsDst = path.join(groupSessionsDir, 'skills');
   const skillsBin = path.join(groupSessionsDir, 'bin');
@@ -171,11 +171,11 @@ function buildVolumeMounts(
           path.join('/workspace/extra/skills', skillDir),
           dstDir,
         );
-      } else {
-        fs.cpSync(srcDir, dstDir, { recursive: true });
       }
+      // Non-main groups get a read-only bind mount of container/skills/ at
+      // /home/node/.claude/skills/ (added below after the loop) — no copy needed.
       // Symlink executable files (same name as skill dir) into bin/
-      const toolPath = path.join(isMain ? srcDir : dstDir, skillDir);
+      const toolPath = path.join(srcDir, skillDir);
       const binLink = path.join(skillsBin, skillDir);
       try {
         if (fs.existsSync(toolPath) && fs.statSync(toolPath).mode & 0o111) {
@@ -195,6 +195,17 @@ function buildVolumeMounts(
     containerPath: '/home/node/.claude',
     readonly: false,
   });
+
+  // Non-main groups get skills via a read-only bind mount instead of copied files.
+  // This keeps skills always up-to-date without per-group disk copies.
+  // The nested mount overlays /home/node/.claude/skills/ inside the already-mounted .claude/.
+  if (!isMain && fs.existsSync(skillsSrc)) {
+    mounts.push({
+      hostPath: skillsSrc,
+      containerPath: '/home/node/.claude/skills',
+      readonly: true,
+    });
+  }
 
   // Per-group IPC namespace: each group gets its own IPC directory
   // This prevents cross-group privilege escalation via IPC
@@ -248,6 +259,22 @@ function buildVolumeMounts(
         readonly: false, // gws needs write access for token cache
       });
     }
+  }
+
+  // Shared data directory: read-only for all containers, writable for main at /workspace/extra/shared/
+  const sharedDataDir = path.join(DATA_DIR, 'shared');
+  fs.mkdirSync(sharedDataDir, { recursive: true });
+  mounts.push({
+    hostPath: sharedDataDir,
+    containerPath: '/workspace/shared',
+    readonly: true,
+  });
+  if (isMain) {
+    mounts.push({
+      hostPath: sharedDataDir,
+      containerPath: '/workspace/extra/shared',
+      readonly: false,
+    });
   }
 
   // Additional mounts validated against external allowlist (tamper-proof from containers)
