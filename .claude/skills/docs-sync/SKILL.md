@@ -1,3 +1,11 @@
+---
+name: docs-sync
+description: Perform a repo-wide documentation sync for the NanoClaw project.
+version: 1.0.0
+allowed-tools: Read, Edit, Write, Glob, Grep, Bash
+invocation: /docs-sync
+---
+
 Perform a repo-wide documentation sync for the NanoClaw project.
 
 ## Scope

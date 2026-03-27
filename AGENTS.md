@@ -33,7 +33,7 @@ WhatsApp (baileys) --> SQLite --> Polling loop --> Container (Claude Agent SDK) 
 | `container/Dockerfile` | Agent container image definition |
 | `container/build.sh` | Container image build script |
 | `container/skills/` | Skill markdown files available inside containers |
-| `container/skills/agent-browser.md` | Browser automation tool (Chromium, available via Bash) |
+| `container/skills/agent-browser/` | Browser automation tool (Chromium, available via Bash) |
 | `groups/{name}/CLAUDE.md` | Per-group persistent memory |
 | `groups/CLAUDE.md` | Global memory (read by all groups, writable only from main) |
 | `.claude/skills/` | Host-side Claude Code skills (setup, customize, debug, etc.) |
@@ -91,7 +91,10 @@ When an agent runs, it executes inside a Linux container (Docker or Apple Contai
 |-------------------------------|------------|
 | `/workspace/project` | Project root (read-only, main group only) |
 | `/workspace/group` | This group's folder (read-write) |
-| `/workspace/global` | `groups/CLAUDE.md` global memory (read-only for non-main) |
+| `/workspace/global` | Global memory dir (read-only for non-main) |
+| `/workspace/shared` | Shared data directory (read-only for all groups) |
+| `/workspace/extra/shared` | Shared data directory (read-write, main group only) |
+| `/home/node/.claude/skills` | Container skills (read-only bind mount, non-main groups only) |
 | Additional paths | Configured per-group via `containerConfig`, validated against allowlist |
 
 Bash commands the agent runs execute inside the container — they cannot affect the host system directly.

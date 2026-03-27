@@ -27,6 +27,8 @@ Host-side Claude Code skills (slash commands) for managing the NanoClaw installa
 | `x-integration/` | X (Twitter) posting integration |
 | `qodo-pr-resolver/` | Fetch and fix Qodo PR review issues |
 | `get-qodo-rules/` | Load org/repo coding rules from Qodo |
+| `docs-sync/` | Repo-wide documentation sync (AGENTS.md hierarchy, CLAUDE.md, docs/) |
+| `git-sync/` | Pull, auto-commit pending changes, push — leaves clean slate |
 
 ## For AI Agents
 

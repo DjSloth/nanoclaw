@@ -20,7 +20,7 @@ Single Node.js process that connects to WhatsApp, routes messages to Claude Agen
 | `src/group-queue.ts` | Per-group queue with global concurrency limit |
 | `src/db.ts` | SQLite operations |
 | `groups/{name}/CLAUDE.md` | Per-group memory (isolated) |
-| `container/skills/agent-browser.md` | Browser automation tool (available to all agents via Bash) |
+| `container/skills/agent-browser/` | Browser automation tool (available to all agents via Bash) |
 | `AGENTS.md` | AI agent reference guide (architecture, security boundaries, container context) |
 | `docs/SKILLS_ARCHITECTURE.md` | Skills system: git merge mechanics, apply flow, conflict resolution |
 
@@ -34,6 +34,8 @@ Single Node.js process that connects to WhatsApp, routes messages to Claude Agen
 | `/update` | Pull upstream NanoClaw changes, merge with customizations, run migrations |
 | `/qodo-pr-resolver` | Fetch and fix Qodo PR review issues interactively or in batch |
 | `/get-qodo-rules` | Load org- and repo-level coding rules from Qodo before code tasks |
+| `/docs-sync` | Sync AGENTS.md hierarchy, CLAUDE.md, and docs/ against current code |
+| `/git-sync` | Pull, auto-commit pending changes, push — clean slate |
 
 ## Commands
 
