@@ -18,6 +18,19 @@ Your output is sent to the user or group.
 
 You also have `mcp__nanoclaw__send_message` which sends a message immediately while you're still working. This is useful when you want to acknowledge a request before starting longer work.
 
+### 🚨 NO GHOSTING RULE
+
+**ALWAYS acknowledge before performing any task — even an emoji is enough.**
+
+Use `mcp__nanoclaw__send_message` to send an immediate acknowledgment, then do the work. Never start a long task in silence. This has been flagged many times and is a hard requirement.
+
+Examples:
+- "👍 On it" → then do the task
+- "🔍 Looking into it..." → then research
+- "⏳ Fetching..." → then fetch
+
+No exceptions.
+
 ### Internal thoughts
 
 If part of your output is internal reasoning rather than something for the user, wrap it in `<internal>` tags:

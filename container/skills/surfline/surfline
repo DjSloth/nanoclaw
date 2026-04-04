@@ -2,6 +2,73 @@
 set -uo pipefail
 
 SURFLINE_BASE="https://services.surfline.com"
+SG_BASE="https://api.stormglass.io/v2"
+SG_PARAMS="swellHeight,swellPeriod,swellDirection,secondarySwellHeight,secondarySwellPeriod,secondarySwellDirection,waveHeight,wavePeriod,waveDirection,windSpeed,windDirection,gust"
+
+# Spot coordinates lookup (for Stormglass calls)
+spot_lat_lng() {
+  case "$1" in
+    584204204e65fad6a7709aa7) echo "32.476 34.882" ;;   # Power Plant / Sdot Yam
+    640a665799dd44dd3d0c88df) echo "32.2734 34.8329" ;; # Sandbox / Poleg Beach
+    640a6699451905095aa61467) echo "32.7095 34.9413" ;; # Fort / Atlit
+    *) echo "" ;;
+  esac
+}
+
+# Fetch Stormglass hourly data for a lat/lng window. No source filter = all models.
+sg_fetch() {
+  local lat="$1" lng="$2" start="$3" end="$4"
+  local key="${STORMGLASS_API_KEY:-}"
+  [ -z "$key" ] && return 1
+  curl -sf --max-time 20 \
+    "${SG_BASE}/weather/point?lat=${lat}&lng=${lng}&params=${SG_PARAMS}&start=${start}&end=${end}" \
+    -H "Authorization: ${key}"
+}
+
+# Given a JSON object of model values (e.g. {"noaa":1.06,"ecmwf":1.0,"sg":1.05}),
+# compute avg and spread of non-sg sources. Outputs: "avg spread"
+sg_spread() {
+  echo "$1" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+vals = [v for k,v in d.items() if k != 'sg' and isinstance(v, (int,float))]
+if len(vals) < 2:
+    print('? 0')
+else:
+    avg = sum(vals)/len(vals)
+    spread = max(vals) - min(vals)
+    print(f'{avg:.2f} {spread:.2f}')
+" 2>/dev/null || echo "? 0"
+}
+
+# Confidence badge based on spread
+sg_confidence() {
+  local spread="$1"
+  python3 -c "
+s = float('$spread') if '$spread' != '?' else 999
+if s < 0.1: print('✅ High')
+elif s < 0.25: print('〜 Medium')
+else: print('⚠️ Low')
+" 2>/dev/null || echo "〜"
+}
+
+# Source names present (excluding 'sg')
+sg_sources() {
+  echo "$1" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+srcs = sorted(k.upper() for k in d if k != 'sg' and isinstance(d[k], (int,float)))
+print('/'.join(srcs))
+" 2>/dev/null || echo "?"
+}
+
+# Compass from degrees
+deg2c() {
+  python3 -c "
+dirs=['N','NNE','NE','ENE','E','ESE','SE','SSE','S','SSW','SW','WSW','W','WNW','NW','NNW']
+print(dirs[round(float('$1')/22.5)%16])
+" 2>/dev/null || echo "?"
+}
 
 usage() {
   cat <<'EOF'
@@ -94,6 +161,11 @@ cmd_conditions() {
   [ "$wave_unit" = "FT" ] && wave_display="${wave_min}-${wave_max}ft"
   [ -n "$wave_human" ] && wave_display="${wave_display} (${wave_human})"
 
+  # Lat/lon for Stormglass
+  local spot_lat spot_lon
+  spot_lat=$(echo "$json" | jq -r '.spot.lat // ""')
+  spot_lon=$(echo "$json" | jq -r '.spot.lon // ""')
+
   cat <<EOF
 ${name} [${spot_type}]
   Conditions: ${rating}
@@ -103,6 +175,58 @@ ${name} [${spot_type}]
   Water temp: ${water_temp}°${temp_unit}
   Tide: ${tide_current} → next: ${tide_next}
 EOF
+
+  # Stormglass model consensus (Option B)
+  if [ -n "${STORMGLASS_API_KEY:-}" ] && [ -n "$spot_lat" ] && [ -n "$spot_lon" ]; then
+    local now end_ts sg_json
+    now=$(date -u +%s)
+    end_ts=$((now + 3600))
+    sg_json=$(sg_fetch "$spot_lat" "$spot_lon" "$now" "$end_ts" 2>/dev/null) || sg_json=""
+
+    if [ -n "$sg_json" ] && echo "$sg_json" | jq -e '.hours[0]' >/dev/null 2>&1; then
+      local hr
+      hr=$(echo "$sg_json" | jq '.hours[0]')
+
+      # sg = Stormglass AI-blended value (authoritative). Spread of raw models = confidence.
+      local wh_json wh_sg wh_spread wh_conf wh_sources
+      wh_json=$(echo "$hr" | jq -c '.waveHeight // {}')
+      wh_sg=$(echo "$hr"  | jq -r '.waveHeight.sg // "?"')
+      wh_spread=$(sg_spread "$wh_json" | awk '{print $2}')
+      wh_conf=$(sg_confidence "$wh_spread")
+      wh_sources=$(sg_sources "$wh_json")
+
+      # Primary swell (sg values)
+      local sw_h sw_p sw_d_deg sw_d_comp
+      sw_h=$(echo "$hr" | jq -r '.swellHeight.sg // "?"')
+      sw_p=$(echo "$hr" | jq -r '.swellPeriod.sg // "?"')
+      sw_d_deg=$(echo "$hr" | jq -r '.swellDirection.sg // ""')
+      sw_d_comp=""
+      [ -n "$sw_d_deg" ] && sw_d_comp=$(deg2c "$sw_d_deg")
+
+      # Secondary swell (sg values)
+      local sw2_h sw2_p sw2_d_deg sw2_d_comp
+      sw2_h=$(echo "$hr" | jq -r '.secondarySwellHeight.sg // "?"')
+      sw2_p=$(echo "$hr" | jq -r '.secondarySwellPeriod.sg // "?"')
+      sw2_d_deg=$(echo "$hr" | jq -r '.secondarySwellDirection.sg // ""')
+      sw2_d_comp=""
+      [ -n "$sw2_d_deg" ] && sw2_d_comp=$(deg2c "$sw2_d_deg")
+
+      # Wind (sg = AI-blended, m/s → kph)
+      local sg_wind_spd sg_wind_dir_deg sg_wind_dir_comp sg_gust sg_wind_kph sg_gust_kph
+      sg_wind_spd=$(echo "$hr" | jq -r '.windSpeed.sg // "?"')
+      sg_wind_dir_deg=$(echo "$hr" | jq -r '.windDirection.sg // ""')
+      sg_wind_dir_comp=""
+      [ -n "$sg_wind_dir_deg" ] && sg_wind_dir_comp=$(deg2c "$sg_wind_dir_deg")
+      sg_gust=$(echo "$hr" | jq -r '.gust.sg // "?"')
+      sg_wind_kph=$(python3 -c "print(round(float('$sg_wind_spd') * 3.6, 1))" 2>/dev/null || echo "$sg_wind_spd")
+      sg_gust_kph=$(python3 -c "print(round(float('$sg_gust') * 3.6, 1))" 2>/dev/null || echo "$sg_gust")
+
+      echo "  ╌╌ Stormglass AI [models: ${wh_sources}] ╌╌"
+      echo "  Wave: ${wh_sg}m  model spread ±${wh_spread}m  ${wh_conf} confidence"
+      echo "  Swell: ${sw_d_comp} ${sw_d_deg}° @ ${sw_p}s ${sw_h}m  |  2nd: ${sw2_d_comp} @ ${sw2_p}s ${sw2_h}m"
+      echo "  Wind: ${sg_wind_dir_comp} ${sg_wind_kph}kph (gusts ${sg_gust_kph}kph)"
+    fi
+  fi
 }
 
 cmd_forecast() {
@@ -135,7 +259,57 @@ cmd_forecast() {
     consistency_json='{"data":{"consistency":[]}}'
   fi
 
+  # Stormglass — one call for the full forecast window (Option C)
+  local sg_json="" sg_by_hour="{}"
+  local coords
+  coords=$(spot_lat_lng "$spot_id")
+  if [ -n "${STORMGLASS_API_KEY:-}" ] && [ -n "$coords" ]; then
+    local sg_lat sg_lng
+    sg_lat=$(echo "$coords" | awk '{print $1}')
+    sg_lng=$(echo "$coords" | awk '{print $2}')
+    local now end_ts
+    now=$(date -u +%s)
+    end_ts=$((now + days * 86400))
+    sg_json=$(sg_fetch "$sg_lat" "$sg_lng" "$now" "$end_ts" 2>/dev/null) || sg_json=""
+    if [ -n "$sg_json" ] && echo "$sg_json" | jq -e '.hours' >/dev/null 2>&1; then
+      # Build hour-keyed lookup: unix_timestamp -> {waveHeight, swellHeight, swellPeriod, swellDirection, spread}
+      sg_by_hour=$(echo "$sg_json" | python3 -c "
+import sys, json
+from datetime import datetime, timezone
+data = json.load(sys.stdin)
+out = {}
+for hr in data.get('hours', []):
+    t = hr.get('time', '')
+    # parse ISO time to unix
+    try:
+        dt = datetime.fromisoformat(t.replace('Z', '+00:00'))
+        ts = int(dt.timestamp())
+    except:
+        continue
+    def spread(param):
+        d = hr.get(param, {})
+        vals = [v for k,v in d.items() if k != 'sg' and isinstance(v, (int,float))]
+        if len(vals) < 2: return 0.0
+        return round(max(vals)-min(vals), 2)
+    def sg(param):
+        return hr.get(param, {}).get('sg', None)
+    out[str(ts)] = {
+        'wh': sg('waveHeight'),
+        'wh_spread': spread('waveHeight'),
+        'sh': sg('swellHeight'),
+        'sp': sg('swellPeriod'),
+        'sd': sg('swellDirection'),
+        'wsp': sg('windSpeed'),
+        'wdir': sg('windDirection'),
+        'gust': sg('gust'),
+    }
+print(json.dumps(out))
+" 2>/dev/null || echo "{}")
+    fi
+  fi
+
   echo "${spot_id} — ${days}-day forecast"
+  [ -n "$sg_json" ] && echo "(+ Stormglass AI cross-reference  sg=AI-blended  ±spread=model agreement)"
   echo "---"
 
   # Print sunrise/sunset times as header per day
@@ -148,6 +322,7 @@ cmd_forecast() {
   ' 2>/dev/null
   echo ""
 
+  # Build base forecast with Stormglass overlay via Python (handles JSON merge cleanly)
   echo "$wave_json" "$wind_json" "$rating_json" "$swells_json" "$consistency_json" | jq -rs '
     def deg2c(d): ["N","NNE","NE","ENE","E","ESE","SE","SSE","S","SSW","SW","WSW","W","WNW","NW","NNW"]
                   | .[(((d + 11.25) / 22.5) | floor) % 16];
@@ -166,8 +341,38 @@ cmd_forecast() {
     | (if ($w.direction // null) != null then deg2c($w.direction) else "?" end) as $wdir
     | ($rating[(.timestamp | tostring)].rating // {}) as $r
     | ($consist[(.timestamp | tostring)].consistency.waveCount // null) as $c
-    | "\($time)  [\($r.value // "?")/5 \($r.key // "?")]  \(.surf.min)-\(.surf.max)m  \($dir)@\($primary.period // 0)s  \(.power | round)kJ\(if $c != null then "  consistency:\($c | round)%" else "" end)  wind:\($wdir) \($w.speed // "?" | if type=="number" then round else . end)kph(\($w.directionType // "?"))  \(.surf.humanRelation // "")"
-  ' 2>/dev/null || echo "Could not parse forecast data"
+    | "\(.timestamp)|\($time)  [\($r.value // "?")/5 \($r.key // "?")]  \(.surf.min)-\(.surf.max)m  \($dir)@\($primary.period // 0)s  \(.power | round)kJ\(if $c != null then "  consistency:\($c | round)%" else "" end)  wind:\($wdir) \($w.speed // "?" | if type=="number" then round else . end)kph(\($w.directionType // "?"))  \(.surf.humanRelation // "")"
+  ' 2>/dev/null | python3 -c "
+import sys, json
+
+sg = json.loads('''${sg_by_hour}'''.replace('\\'', '\"'))
+
+def conf(spread):
+    if spread < 0.1: return '✅'
+    elif spread < 0.25: return '〜'
+    else: return '⚠️'
+
+def deg2c(d):
+    dirs=['N','NNE','NE','ENE','E','ESE','SE','SSE','S','SSW','SW','WSW','W','WNW','NW','NNW']
+    return dirs[round(d/22.5)%16]
+
+for line in sys.stdin:
+    line = line.rstrip()
+    if '|' not in line:
+        print(line)
+        continue
+    ts_str, rest = line.split('|', 1)
+    ts = ts_str.strip()
+    sg_hr = sg.get(ts, {})
+    suffix = ''
+    if sg_hr:
+        wh = sg_hr.get('wh')
+        spread = sg_hr.get('wh_spread', 0)
+        if wh is not None:
+            badge = conf(spread)
+            suffix = f'  [SG:{wh:.1f}m±{spread:.2f} {badge}]'
+    print(rest + suffix)
+" 2>/dev/null || echo "Could not parse forecast data"
 }
 
 cmd_search() {

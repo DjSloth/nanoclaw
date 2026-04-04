@@ -81,12 +81,36 @@ These are the user's current favorite Surfline spots. When the user asks about "
 
 ## Consistency scale
 
-Consistency % is a MAJOR factor — always report it:
+Consistency % is a MAJOR factor — always report it. Energy alone is misleading:
 - **< 30%**: Rubbish — long waits between sets
-- **31–60%**: Meh — mediocre
+- **31–60%**: Meh — mediocre. Even with decent energy, sets are too infrequent to matter
 - **61–80%**: OK — decent session potential
 - **81–95%**: Good — consistent waves
 - **96–100%**: FIRE 🔥 — non-stop sets, epic session
+
+### Consistency + tide: real-world calibration (Mar 2026)
+
+Two days at Power Plant with similar energy (~100–115 kJ) had completely different outcomes:
+
+| Date | Energy | Consistency | Tide | Result |
+|------|--------|-------------|------|--------|
+| Mon Mar 23 | ~115 kJ | 70–80% | Low tide | Great session |
+| Sat Mar 28 | ~107 kJ | <50% | High tide | Barely worth getting wet — very short, low consistency break |
+
+*Lesson*: Never lead with energy alone. **Consistency is the go/no-go signal.** Sub-50% = long waits, not worth it even when energy looks OK on paper. High tide at Power Plant compounds low consistency — the break shortens and gets less defined. Low tide + 70%+ consistency is the winning combo.
+
+## Stormglass cross-reference
+
+Conditions and forecasts automatically include a Stormglass cross-check when `STORMGLASS_API_KEY` is set.
+
+*How to read it:*
+- `sg` value = Stormglass's **AI-blended forecast** — their proprietary model trained on all raw sources. This is the authoritative SG number, not a simple average.
+- `±spread` = disagreement between raw models (DWD / ECMWF / METEO / NOAA). This is the **confidence signal only**.
+  - ✅ spread < 0.1m → High confidence (models agree)
+  - 〜 spread 0.1–0.25m → Medium confidence
+  - ⚠️ spread > 0.25m → Low confidence (models disagree — treat forecast with caution)
+- Wind speed is in m/s from SG → converted to kph. SG wind tends to be more accurate than Surfline's local station readings.
+- API quota: 10 requests/day. Each `conditions` or `forecast` call = 1 request.
 
 ## Wind guidelines (Israel)
 
@@ -111,15 +135,16 @@ Use these profiles to assess whether a spot is working. Cross-reference live dat
 
 ### The Sandbox (Poleg Beach) — 640a665799dd44dd3d0c88df
 - **Actual location**: ~1.5–2km north of Poleg Beach proper
+- **Also known as**: השמורה (Ha'Shmura)
 - **Type**: Shallow beach/rocks break — sand on rocks creates consistent breaks
-- **Energy window**: 50–200 kJ sweet spot. Works even in ankle biters. Gets messy above 200 kJ.
+- **Energy window**: 50–200 kJ sweet spot for wind swell. **Ground swell is a different game** — see below.
 - **Wave types**:
-  - Wind swell (6–7s period): 50–200 kJ, up to chest-shoulder high
-  - Ground swell (10–12s+ period): shoulder to overhead, higher quality
+  - Wind swell (6–7s period): 50–200 kJ, up to chest-shoulder high. Above 200 kJ = closes out.
+  - Ground swell (10–12s+ period): handles much higher energy cleanly. The back reef is deep enough that long-period swell travels over it and breaks in an organized way — even at 300–400+ kJ. **Don't rule Sandbox out on high-energy days if the period is 10s+.**
 - **Break zones**: Small conditions = inside reef; firing = far reef (needs ground swell + high interval between sets)
 - **Wind tolerance**: Protected by 5–10m cliffs to the west. Best with no wind or light winds (up to 6–8 km/h). Offshore (E) protected on small days.
 - **Crowd factor**: VERY LOW — 6–7 min hike + rocky entry filters out kooks. Usually just The Balcony gang. Big advantage for catching waves.
-- **Summary**: The small-day option — clean, fun, and uncrowded.
+- **Summary**: The small-day option for wind swell — but can fire hard on ground swell even when energy looks too high on paper. Always check period before writing it off.
 
 ### The Fort (Atlit Old Port) — 640a6699451905095aa61467
 - **Type**: Deep point break-like spot, deeper than Sdot Yam
