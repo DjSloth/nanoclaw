@@ -50,7 +50,7 @@ interface SessionsIndex {
 
 type ContentBlock =
   | { type: 'text'; text: string }
-  | { type: 'image'; source: { type: 'base64'; media_type: string; data: string } };
+  | { type: 'image'; source: { type: 'base64'; media_type: 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp'; data: string } };
 
 interface SDKUserMessage {
   type: 'user';
@@ -77,7 +77,7 @@ class MessageStream {
       ? [
           ...images.map(img => ({
             type: 'image' as const,
-            source: { type: 'base64' as const, media_type: img.mimeType, data: img.data },
+            source: { type: 'base64' as const, media_type: img.mimeType as 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp', data: img.data },
           })),
           { type: 'text' as const, text },
         ]
