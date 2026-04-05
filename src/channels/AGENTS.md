@@ -1,5 +1,5 @@
 <!-- Parent: ../AGENTS.md -->
-<!-- Generated: 2026-03-26 | Updated: 2026-03-26 -->
+<!-- Generated: 2026-03-26 | Updated: 2026-04-05 -->
 
 # src/channels
 
@@ -12,7 +12,7 @@ Channel abstraction layer. Each file implements the `Channel` interface from `sr
 |------|-------------|
 | `index.ts` | Barrel import — importing this file causes all channels to self-register |
 | `registry.ts` | Channel factory registry: `registerChannel`, `getChannelFactory`, `getRegisteredChannelNames` |
-| `whatsapp.ts` | WhatsApp channel via Baileys library — connection, QR auth, send/receive, typing indicator, group sync |
+| `whatsapp.ts` | WhatsApp channel via Baileys library — connection, QR auth, send/receive, typing indicator, group sync; image resizing (sharp, 2000px max), document text extraction (txt/pdf/docx via pdf-parse/mammoth) |
 
 ## For AI Agents
 
@@ -39,5 +39,8 @@ Channel abstraction layer. Each file implements the `Channel` interface from `sr
 
 ### External
 - `@whiskeysockets/baileys` — WhatsApp Web protocol implementation
+- `sharp` — image resizing before passing to agent (2000px max dimension)
+- `pdf-parse` — PDF text extraction from document attachments
+- `mammoth` — DOCX text extraction from document attachments
 
 <!-- MANUAL: -->

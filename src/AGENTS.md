@@ -1,5 +1,5 @@
 <!-- Parent: ../AGENTS.md -->
-<!-- Generated: 2026-03-26 | Updated: 2026-03-26 -->
+<!-- Generated: 2026-03-26 | Updated: 2026-04-05 -->
 
 # src
 
@@ -67,5 +67,9 @@ Main application source code for the NanoClaw host process. This single Node.js 
 - `better-sqlite3` — synchronous SQLite driver
 - `pino` — structured logging
 - `cron-parser` — cron expression parsing for scheduler
+- `sharp` — image resizing for WhatsApp image attachments
+- `pdf-parse` — PDF text extraction for WhatsApp document attachments
+- `mammoth` — DOCX text extraction for WhatsApp document attachments
+- `qrcode-terminal` — QR code display for WhatsApp re-authentication
 
 <!-- MANUAL: -->

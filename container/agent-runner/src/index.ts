@@ -59,6 +59,53 @@ interface SDKUserMessage {
   session_id: string;
 }
 
+const MAX_IMAGE_DIM = 2000;
+
+function getImageDimensions(data: string, mimeType: string): { width: number; height: number } | null {
+  try {
+    const buf = Buffer.from(data, 'base64');
+    if (mimeType === 'image/png' || (buf[0] === 0x89 && buf[1] === 0x50)) {
+      return { width: buf.readUInt32BE(16), height: buf.readUInt32BE(20) };
+    }
+    if (mimeType === 'image/jpeg' || (buf[0] === 0xff && buf[1] === 0xd8)) {
+      let i = 2;
+      while (i < buf.length - 8) {
+        if (buf[i] !== 0xff) break;
+        const marker = buf[i + 1];
+        const len = buf.readUInt16BE(i + 2);
+        if ((marker >= 0xc0 && marker <= 0xc3) || (marker >= 0xc5 && marker <= 0xc7) ||
+            (marker >= 0xc9 && marker <= 0xcb) || (marker >= 0xcd && marker <= 0xcf)) {
+          return { height: buf.readUInt16BE(i + 5), width: buf.readUInt16BE(i + 7) };
+        }
+        i += 2 + len;
+      }
+    }
+  } catch {
+    // ignore parse errors
+  }
+  return null;
+}
+
+function filterOversizedImages(images: Array<{ data: string; mimeType: string }>): {
+  images: Array<{ data: string; mimeType: string }> | undefined;
+  note: string;
+} {
+  const safe: Array<{ data: string; mimeType: string }> = [];
+  let dropped = 0;
+  for (const img of images) {
+    const dims = getImageDimensions(img.data, img.mimeType);
+    if (dims && (dims.width > MAX_IMAGE_DIM || dims.height > MAX_IMAGE_DIM)) {
+      dropped++;
+    } else {
+      safe.push(img);
+    }
+  }
+  const note = dropped > 0
+    ? `\n\n[Note: ${dropped} image(s) were omitted because they exceed the ${MAX_IMAGE_DIM}px dimension limit.]`
+    : '';
+  return { images: safe.length ? safe : undefined, note };
+}
+
 const IPC_INPUT_DIR = '/workspace/ipc/input';
 const IPC_INPUT_CLOSE_SENTINEL = path.join(IPC_INPUT_DIR, '_close');
 const IPC_POLL_MS = 500;
@@ -530,7 +577,11 @@ async function main(): Promise<void> {
     while (true) {
       log(`Starting query (session: ${sessionId || 'new'}, resumeAt: ${resumeAt || 'latest'})...`);
 
-      const queryResult = await runQuery(prompt, sessionId, mcpServerPath, containerInput, sdkEnv, resumeAt, containerInput.images);
+      const { images: safeImages, note: imageNote } = containerInput.images?.length
+        ? filterOversizedImages(containerInput.images)
+        : { images: undefined, note: '' };
+      if (imageNote) prompt += imageNote;
+      const queryResult = await runQuery(prompt, sessionId, mcpServerPath, containerInput, sdkEnv, resumeAt, safeImages?.length ? safeImages : undefined);
       if (queryResult.newSessionId) {
         sessionId = queryResult.newSessionId;
       }

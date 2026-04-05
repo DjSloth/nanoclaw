@@ -1,5 +1,5 @@
 <!-- Parent: ../AGENTS.md -->
-<!-- Generated: 2026-03-26 | Updated: 2026-03-26 -->
+<!-- Generated: 2026-03-26 | Updated: 2026-04-05 -->
 
 # container/agent-runner
 
@@ -10,9 +10,18 @@ Node.js process that runs inside the container and wraps the Claude Agent SDK. I
 
 | File | Description |
 |------|-------------|
-| `src/` | Agent-runner TypeScript source |
+| `src/index.ts` | Agent-runner entry point — reads stdin, invokes Claude Agent SDK, streams output |
 | `package.json` | Dependencies for the agent-runner (separate from host package.json) |
 | `tsconfig.json` | TypeScript config for agent-runner |
+
+## Key Constants and Functions in `src/index.ts`
+
+| Symbol | Description |
+|--------|-------------|
+| `MAX_IMAGE_DIM` | Maximum image dimension (2000px) — images exceeding this are dropped before passing to the SDK |
+| `getImageDimensions()` | Parses PNG/JPEG headers to extract width/height without a library |
+| `filterOversizedImages()` | Filters image array, dropping any image that exceeds `MAX_IMAGE_DIM` in either dimension |
+| `MessageStream` | Push-based async iterable that feeds follow-up messages to the SDK during an active session |
 
 ## For AI Agents
 
@@ -33,7 +42,7 @@ Node.js process that runs inside the container and wraps the Claude Agent SDK. I
 - Must match the `ContainerInput` / `ContainerOutput` interfaces defined in `src/container-runner.ts`
 
 ### External
-- `@anthropic-ai/claude-code` — Claude Agent SDK
+- `@anthropic-ai/claude-agent-sdk` — Claude Agent SDK
 - Node.js 20+
 
 <!-- MANUAL: -->

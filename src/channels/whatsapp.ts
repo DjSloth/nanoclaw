@@ -2,6 +2,10 @@ import { exec } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 
+import mammoth from 'mammoth';
+import pdfParse from 'pdf-parse';
+import sharp from 'sharp';
+
 import makeWASocket, {
   Browsers,
   DisconnectReason,
@@ -221,10 +225,55 @@ export class WhatsAppChannel implements Channel {
                 {},
                 { logger: console as any, reuploadRequest: this.sock.updateMediaMessage },
               )) as Buffer;
-              images = [{ data: buffer.toString('base64'), mimeType: imgMsg.mimetype || 'image/jpeg' }];
-              logger.info({ chatJid, bytes: buffer.length }, 'Downloaded image attachment');
+              const resized = await sharp(buffer)
+                .resize(2000, 2000, { fit: 'inside', withoutEnlargement: true })
+                .toBuffer();
+              images = [{ data: resized.toString('base64'), mimeType: imgMsg.mimetype || 'image/jpeg' }];
+              logger.info({ chatJid, bytes: buffer.length, resizedBytes: resized.length }, 'Downloaded image attachment');
             } catch (err) {
               logger.warn({ err }, 'Failed to download image attachment');
+            }
+          }
+
+          // Extract text from document attachments (txt, pdf, docx, etc.)
+          const docMsg = msg.message?.documentMessage;
+          if (docMsg) {
+            const filename = docMsg.fileName || 'document';
+            const mimetype = docMsg.mimetype || '';
+            try {
+              const buffer = (await downloadMediaMessage(
+                msg, 'buffer', {},
+                { logger: console as any, reuploadRequest: this.sock.updateMediaMessage },
+              )) as Buffer;
+
+              let extracted = '';
+              if (mimetype === 'text/plain' || filename.endsWith('.txt')) {
+                extracted = buffer.toString('utf-8');
+              } else if (mimetype === 'application/pdf' || filename.endsWith('.pdf')) {
+                const parsed = await pdfParse(buffer);
+                extracted = parsed.text;
+              } else if (
+                mimetype === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' ||
+                filename.endsWith('.docx')
+              ) {
+                const result = await mammoth.extractRawText({ buffer });
+                extracted = result.value;
+              } else {
+                extracted = `[Attached file: ${filename} (${mimetype}) — content not extractable]`;
+              }
+
+              if (extracted) {
+                const MAX_DOC_CHARS = 100_000;
+                const truncated = extracted.length > MAX_DOC_CHARS
+                  ? extracted.slice(0, MAX_DOC_CHARS) + `\n[... truncated, ${extracted.length - MAX_DOC_CHARS} chars omitted]`
+                  : extracted;
+                const caption = docMsg.caption ? `${docMsg.caption}\n\n` : '';
+                finalContent = `${caption}[Document: ${filename}]\n\`\`\`\n${truncated}\n\`\`\``;
+                logger.info({ chatJid, filename, mimetype, chars: extracted.length }, 'Extracted document text');
+              }
+            } catch (err) {
+              logger.warn({ err, filename, mimetype }, 'Failed to extract document text');
+              finalContent = `[Document: ${filename} — failed to extract content]`;
             }
           }
 
