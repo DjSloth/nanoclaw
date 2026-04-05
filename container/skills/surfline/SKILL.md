@@ -99,6 +99,15 @@ Two days at Power Plant with similar energy (~100–115 kJ) had completely diffe
 
 *Lesson*: Never lead with energy alone. **Consistency is the go/no-go signal.** Sub-50% = long waits, not worth it even when energy looks OK on paper. High tide at Power Plant compounds low consistency — the break shortens and gets less defined. Low tide + 70%+ consistency is the winning combo.
 
+### Ground swell calibration — Sandbox (Apr 2026)
+
+| Date | Energy | Period | Wind | Result |
+|------|--------|--------|------|--------|
+| Fri Apr 3 | ~350 kJ | WNW 10s | W onshore (afternoon) | Pumping — epic afternoon session |
+| Sat Apr 4 | ~550–580 kJ | WNW 11s | Offshore, near zero | *CAREER SESSION* — chest-head high, long peeling walls, 50+ quality waves on longboard. "Maldives-like" clean peeling waves. |
+
+*Lesson*: At Sandbox, **ground swell (10s+) with offshore wind is the magic formula** — energy numbers that would normally indicate closeout conditions (500+ kJ) produce long, clean, peeling waves because the deep back reef organizes the long-period swell. Don't discard Sandbox on high-energy days — check the period first.
+
 ## Stormglass cross-reference
 
 Conditions and forecasts automatically include a Stormglass cross-check when `STORMGLASS_API_KEY` is set.
@@ -143,7 +152,7 @@ Use these profiles to assess whether a spot is working. Cross-reference live dat
   - Ground swell (10–12s+ period): handles much higher energy cleanly. The back reef is deep enough that long-period swell travels over it and breaks in an organized way — even at 300–400+ kJ. **Don't rule Sandbox out on high-energy days if the period is 10s+.**
 - **Break zones**: Small conditions = inside reef; firing = far reef (needs ground swell + high interval between sets)
 - **Wind tolerance**: Protected by 5–10m cliffs to the west. Best with no wind or light winds (up to 6–8 km/h). Offshore (E) protected on small days.
-- **Crowd factor**: VERY LOW — 6–7 min hike + rocky entry filters out kooks. Usually just The Balcony gang. Big advantage for catching waves.
+- **Crowd factor**: VERY LOW — 6–7 min hike + rocky entry filters out kooks. Usually just The Balcony gang + occasional guests who find the far peak. Even on epic ground swell days (Apr 4, 550 kJ @ 11s) it stayed uncrowded. Big advantage for catching waves.
 - **Summary**: The small-day option for wind swell — but can fire hard on ground swell even when energy looks too high on paper. Always check period before writing it off.
 
 ### The Fort (Atlit Old Port) — 640a6699451905095aa61467
