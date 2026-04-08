@@ -1,5 +1,5 @@
 <!-- Parent: ../AGENTS.md -->
-<!-- Generated: 2026-03-26 | Updated: 2026-04-05 -->
+<!-- Generated: 2026-03-26 | Updated: 2026-04-08 -->
 
 # src
 
@@ -62,14 +62,17 @@ Main application source code for the NanoClaw host process. This single Node.js 
 - `index.ts` is the entrypoint that wires all modules together
 
 ### External
-- `@ai-sdk/anthropic` / Claude Agent SDK — agent invocation inside containers
 - `@whiskeysockets/baileys` — WhatsApp protocol (via `channels/whatsapp.ts`)
 - `better-sqlite3` — synchronous SQLite driver
-- `pino` — structured logging
+- `pino` / `pino-pretty` — structured logging
 - `cron-parser` — cron expression parsing for scheduler
 - `sharp` — image resizing for WhatsApp image attachments
 - `pdf-parse` — PDF text extraction for WhatsApp document attachments
 - `mammoth` — DOCX text extraction for WhatsApp document attachments
 - `qrcode-terminal` — QR code display for WhatsApp re-authentication
+- `openai` — OpenAI-compatible API client (used for transcription)
+- `form-data` — multipart form data for API requests
+- `yaml` — YAML parsing for config/skill files
+- `zod` — schema validation
 
 <!-- MANUAL: -->
