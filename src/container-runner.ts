@@ -148,40 +148,44 @@ function buildVolumeMounts(
     );
   }
 
-  // Sync skills from container/skills/ into each group's .claude/skills/
-  // Also symlink executable tools into .claude/bin/ so they're on the PATH
+  // Sync skills into each group's .claude/skills/ and wire up executable tools in .claude/bin/.
   //
-  // Main group: symlink skill dirs to /workspace/extra/skills/{skillDir} so
-  // edits to the writable container/skills mount are live immediately.
-  // Other groups: skills are mounted read-only at /home/node/.claude/skills/ (see below).
+  // Sources (applied in order, later entries win on conflict):
+  //   1. container/skills/  — global skills for all groups
+  //   2. groups/{name}/skills/ — group-specific skills, persisted in git
+  //
+  // Main group: global skills are symlinked to /workspace/extra/skills/{skill} so
+  // edits to the container/skills mount are live immediately.
+  // Other groups: global skills are copied into groupSessionsDir/skills/ on each startup.
+  // Group-specific skills are always copied (both main and non-main).
   const skillsSrc = path.join(process.cwd(), 'container', 'skills');
   const skillsDst = path.join(groupSessionsDir, 'skills');
   const skillsBin = path.join(groupSessionsDir, 'bin');
   fs.mkdirSync(skillsBin, { recursive: true });
   if (fs.existsSync(skillsSrc)) {
-    for (const skillDir of fs.readdirSync(skillsSrc)) {
-      const srcDir = path.join(skillsSrc, skillDir);
+    for (const entry of fs.readdirSync(skillsSrc)) {
+      const srcDir = path.join(skillsSrc, entry);
       if (!fs.statSync(srcDir).isDirectory()) continue;
-      const dstDir = path.join(skillsDst, skillDir);
+      const dstDir = path.join(skillsDst, entry);
       if (isMain) {
         // Symlink to the writable mount path inside the container so edits are live
         fs.rmSync(dstDir, { force: true, recursive: true });
         fs.mkdirSync(skillsDst, { recursive: true });
-        fs.symlinkSync(
-          path.join('/workspace/extra/skills', skillDir),
-          dstDir,
-        );
+        fs.symlinkSync(path.join('/workspace/extra/skills', entry), dstDir);
+      } else {
+        // Copy so group-specific skills (below) can coexist without a read-only overlay hiding them
+        fs.rmSync(dstDir, { force: true, recursive: true });
+        fs.mkdirSync(skillsDst, { recursive: true });
+        fs.cpSync(srcDir, dstDir, { recursive: true });
       }
-      // Non-main groups get a read-only bind mount of container/skills/ at
-      // /home/node/.claude/skills/ (added below after the loop) — no copy needed.
-      // Symlink executable files (same name as skill dir) into bin/
-      const toolPath = path.join(srcDir, skillDir);
-      const binLink = path.join(skillsBin, skillDir);
+      // Symlink executable tools (same name as skill dir) into bin/
+      const toolPath = path.join(srcDir, entry);
+      const binLink = path.join(skillsBin, entry);
       try {
         if (fs.existsSync(toolPath) && fs.statSync(toolPath).mode & 0o111) {
           fs.rmSync(binLink, { force: true });
           fs.symlinkSync(
-            path.join('/home/node/.claude/skills', skillDir, skillDir),
+            path.join('/home/node/.claude/skills', entry, entry),
             binLink,
           );
         }
@@ -190,22 +194,41 @@ function buildVolumeMounts(
       }
     }
   }
+
+  // Copy group-specific skills from groups/{name}/skills/ into .claude/skills/.
+  // These persist via git and are installed automatically on every container startup.
+  // Group skills override global skills of the same name.
+  const groupSkillsSrc = path.join(groupDir, 'skills');
+  if (fs.existsSync(groupSkillsSrc)) {
+    fs.mkdirSync(skillsDst, { recursive: true });
+    for (const entry of fs.readdirSync(groupSkillsSrc)) {
+      const srcDir = path.join(groupSkillsSrc, entry);
+      if (!fs.statSync(srcDir).isDirectory()) continue;
+      const dstDir = path.join(skillsDst, entry);
+      fs.rmSync(dstDir, { force: true, recursive: true });
+      fs.cpSync(srcDir, dstDir, { recursive: true });
+      // Symlink executable tools into bin/
+      const toolPath = path.join(srcDir, entry);
+      const binLink = path.join(skillsBin, entry);
+      try {
+        if (fs.existsSync(toolPath) && fs.statSync(toolPath).mode & 0o111) {
+          fs.rmSync(binLink, { force: true });
+          fs.symlinkSync(
+            path.join('/home/node/.claude/skills', entry, entry),
+            binLink,
+          );
+        }
+      } catch {
+        /* skip if symlink fails */
+      }
+    }
+  }
+
   mounts.push({
     hostPath: groupSessionsDir,
     containerPath: '/home/node/.claude',
     readonly: false,
   });
-
-  // Non-main groups get skills via a read-only bind mount instead of copied files.
-  // This keeps skills always up-to-date without per-group disk copies.
-  // The nested mount overlays /home/node/.claude/skills/ inside the already-mounted .claude/.
-  if (!isMain && fs.existsSync(skillsSrc)) {
-    mounts.push({
-      hostPath: skillsSrc,
-      containerPath: '/home/node/.claude/skills',
-      readonly: true,
-    });
-  }
 
   // Per-group IPC namespace: each group gets its own IPC directory
   // This prevents cross-group privilege escalation via IPC

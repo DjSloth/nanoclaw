@@ -53,8 +53,9 @@ Each skill is a directory containing a `SKILL.md` file (and optionally an execut
 
 ### Working In This Directory
 - Each skill is a directory with a `SKILL.md` instruction file (and optionally an executable with the same name)
-- Main group: skills are symlinked into the group's sessions dir at `/workspace/extra/skills/{name}` for live editing
-- Non-main groups: the entire `container/skills/` directory is bind-mounted read-only at `/home/node/.claude/skills/`
+- Main group: global skills are symlinked into the group's sessions dir at `/workspace/extra/skills/{name}` for live editing
+- Non-main groups: global skills are copied into `groupSessionsDir/skills/` on each container startup (no overlay mount)
+- Group-specific skills in `groups/{name}/skills/` are copied into `.claude/skills/` on startup for all groups, overriding globals of the same name
 - To add a new container skill, create a new directory with a `SKILL.md` following the existing pattern
 - Skills marked as protected (co-architect, github-issue-creator, merge-manager, places, pr-reviewer, surfline) must not be deleted or modified without explicit user request
 
