@@ -10,6 +10,7 @@ Claude Code host-side configuration directory. Contains skills (slash commands) 
 
 | File | Description |
 |------|-------------|
+| `settings.json` | Project-level Claude Code settings (committed) |
 | `settings.local.json` | Local Claude Code settings (not committed) |
 
 ## Subdirectories

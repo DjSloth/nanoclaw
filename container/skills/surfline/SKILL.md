@@ -228,6 +228,64 @@ When you encounter a favorite spot with an incomplete profile (or a newly added 
 - Once the user provides info, ask them to update the profile in this file or remember it for future reports
 - Don't ask about all missing spots at once — ask about one at a time, when it's relevant (e.g., when reporting conditions for that spot)
 
+---
+
+## SRF Park TLV — Wave Pool
+
+When the ocean is no-go, always check the wave pool as an alternative.
+
+**Website:** https://www.srfparktlv.co.il/sessions/
+**Hours:** Sun–Thu 06:00–23:00 | Fri 06:00–19:00 | Sat 06:00–23:00
+**Session length:** 60–90 min | **Waves:** every ~4 seconds
+
+### Levels
+| Level | Description |
+|-------|-------------|
+| L0 | Beginners / Bay (classes only) |
+| L1 | Beginners Plus |
+| L2 | Improvers |
+| L3 | Intermediate |
+| L4 | Advanced Carves / Malibu Turns |
+| L5 | Expert / T-Time / Fifty-Fifty |
+| L6 | Ocean-T / Barrel Fest / Pro |
+
+Each session books RIGHT and LEFT sides independently — both can be booked together or separately.
+
+### Checking availability
+
+Use `agent-browser` to open the sessions page. Sessions show remaining spots per side (R: / L:). A `0` means full.
+
+```
+agent-browser open https://www.srfparktlv.co.il/sessions/
+agent-browser snapshot -i
+```
+
+Parse and report: time, level, session name, spots left (R/L). Skip sessions where both sides are full (R:0 L:0). Skip L0 (classes only).
+
+### Agent behavior — no-go ocean days
+
+When **all ocean spots are no-go** (poor conditions, no clean windows):
+
+1. Check SRF Park TLV sessions for today and tomorrow
+2. Report available slots grouped by skill level:
+   - Filter out full sessions (R:0 L:0) and L0 classes
+   - Show time, session name, level, spots left
+3. Append to the surf report:
+
+```
+🏊 *SRF Park TLV — Available Sessions*
+16:00  L3 Secret Spot  R:10 L:14
+19:00  L4 Malibu Turns  R:9 L:14
+21:00  L5 T-Time  R:0 L:3
+📍 srfparktlv.co.il/sessions
+```
+
+### Agent behavior — when asked directly about the pool
+
+"Any sessions at the pool?" / "מה יש בבריכה?" → check availability for today (and tomorrow if evening). Report all non-full sessions with times, levels, and spot counts.
+
+---
+
 ### Scheduled surf reports
 
 The user can ask you to set up recurring surf reports sent to any WhatsApp chat.
