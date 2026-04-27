@@ -1,0 +1,8 @@
+{
+  "alwaysHigh": [
+    "src/router.ts",
+    "container/build.sh",
+    "groups/main/CLAUDE.md"
+  ],
+  "comment": "Files always treated as high-risk regardless of auto-derived protection. Add files here that you've heavily customized or that are security-sensitive."
+}
