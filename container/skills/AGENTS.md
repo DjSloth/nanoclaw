@@ -16,6 +16,7 @@ Each skill is a directory containing a `SKILL.md` file (and optionally an execut
 | `co-architect/` | Senior architect persona for design discussions |
 | `gh-cli/` | GitHub CLI usage patterns for agents |
 | `git-commit/` | Atomic git commit workflow with conventional commit format |
+| `graphify/` | Knowledge graph generation from code/docs/papers (uses `graphifyy` PyPI CLI baked into image) |
 | `github-issue-creator/` | Creates GitHub issues from agent context |
 | `merge-manager/` | Git merge conflict resolution workflow |
 | `persona-exec-assistant/` | Executive assistant persona configuration |
