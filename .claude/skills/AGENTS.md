@@ -14,6 +14,7 @@ Host-side Claude Code skills (slash commands) for managing the NanoClaw installa
 | `customize/` | Add channels, integrations, and behavioral changes |
 | `debug/` | Container diagnostics, log inspection, troubleshooting |
 | `update/` | Pull upstream changes, merge customizations, run migrations |
+| `check-upstream/` | Read-only upstream diff with risk-rated cherry-pick suggestions (safer alternative to `update/`) |
 | `add-discord/` | Install Discord channel integration |
 | `add-gmail/` | Install Gmail integration |
 | `add-parallel/` | Add Parallel AI web research MCP |

@@ -11,6 +11,7 @@ Node.js process that runs inside the container and wraps the Claude Agent SDK. I
 | File | Description |
 |------|-------------|
 | `src/index.ts` | Agent-runner entry point — reads stdin, invokes Claude Agent SDK, streams output |
+| `src/ipc-mcp-stdio.ts` | Stdio-based MCP server that exposes nanoclaw tools (scheduler, send_message) to the SDK by writing JSON commands the host IPC watcher consumes |
 | `package.json` | Dependencies for the agent-runner (separate from host package.json) |
 | `tsconfig.json` | TypeScript config for agent-runner |
 
