@@ -97,6 +97,10 @@ export interface Channel {
   setTyping?(jid: string, isTyping: boolean): Promise<void>;
   // Optional: sync group/chat names from the platform.
   syncGroups?(force: boolean): Promise<void>;
+  // Optional: await any in-flight inbound-message handlers for this chat.
+  // The orchestrator calls this before draining per-chat state so attachment
+  // downloads racing the message loop have a chance to land first.
+  awaitInflight?(chatJid: string): Promise<void>;
 }
 
 // Callback type that channels use to deliver inbound messages
