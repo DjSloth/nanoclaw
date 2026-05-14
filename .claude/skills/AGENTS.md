@@ -30,6 +30,7 @@ Host-side Claude Code skills (slash commands) for managing the NanoClaw installa
 | `get-qodo-rules/` | Load org/repo coding rules from Qodo |
 | `docs-sync/` | Repo-wide documentation sync (AGENTS.md hierarchy, CLAUDE.md, docs/) |
 | `git-sync/` | Pull, auto-commit pending changes, push — leaves clean slate |
+| `gws-renew/` | Renew Google Workspace OAuth refresh tokens and push to Doppler (`nanoclaw-ai`/`prd`) |
 
 ## For AI Agents
 
