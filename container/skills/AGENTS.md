@@ -30,6 +30,7 @@ Each skill is a directory containing a `SKILL.md` file (and optionally an execut
 | `surfline/` | Surf forecast data lookup |
 | `typescript-advanced-types/` | Advanced TypeScript type patterns reference |
 | `webapp-testing/` | Web application testing workflow |
+| `youtube/` | Inspect, transcribe, or download any YouTube video by URL (uses `yt-dlp` + `ffmpeg` baked into image) |
 
 ## For AI Agents
 

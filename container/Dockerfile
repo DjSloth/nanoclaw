@@ -1,7 +1,7 @@
 # NanoClaw Agent Container
 # Runs Claude Agent SDK in isolated Linux VM with browser automation
 
-FROM node:22-slim
+FROM node:22-trixie-slim
 
 # Install system dependencies for Chromium
 RUN apt-get update && apt-get install -y \
@@ -25,8 +25,11 @@ RUN apt-get update && apt-get install -y \
     curl \
     jq \
     git \
+    gnupg \
     python3-pip \
     ripgrep \
+    ffmpeg \
+    unzip \
     && curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
        -o /usr/share/keyrings/githubcli-archive-keyring.gpg \
     && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
@@ -49,6 +52,17 @@ RUN npm install -g agent-browser @anthropic-ai/claude-code @googleworkspace/cli
 
 # Install graphify (knowledge graph CLI used by /graphify skill)
 RUN pip3 install --break-system-packages graphifyy
+
+# Install yt-dlp (used by /youtube skill — needs ffmpeg from apt above).
+# Pre-release pull gives a build that detects current curl-cffi versions
+# for browser TLS impersonation; the [curl-cffi] extra pins a compatible
+# curl-cffi build. YouTube requires impersonation for caption fetches on
+# many videos (otherwise 429).
+RUN pip3 install --break-system-packages --pre "yt-dlp[default,curl-cffi]"
+
+# Install deno — yt-dlp uses it as JS runtime for YouTube's n-challenge
+# extraction (needed for newer videos and auto-translated captions).
+RUN curl -fsSL https://deno.land/install.sh | DENO_INSTALL=/usr/local sh
 
 # Create app directory
 WORKDIR /app
