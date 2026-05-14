@@ -69,7 +69,6 @@ trap cleanup EXIT INT TERM
 renew_one() {
   local account="$1"
   local xdg="$GWS_BASE/$account"
-  local creds_path="$xdg/gws/credentials.json"
   local doppler_key="${DOPPLER_KEY[$account]}"
 
   echo
@@ -127,9 +126,6 @@ renew_one() {
   rm -rf "$cleanup_profile"
   cleanup_profile=""
   rm -f "$login_log"
-
-  yellow "→ Writing credentials.json…"
-  XDG_CONFIG_HOME="$xdg" gws auth export "$creds_path" >/dev/null
 
   yellow "→ Extracting refresh_token…"
   local refresh_token

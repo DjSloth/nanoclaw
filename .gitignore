@@ -32,6 +32,9 @@ groups/global/*
 # Skills system (local per-installation state)
 .nanoclaw/
 
+# Claude Code runtime artifacts
+.claude/scheduled_tasks.lock
+
 agents-sdk-docs
 
 # Oh-My-ClaudeCode
