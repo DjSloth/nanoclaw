@@ -31,6 +31,7 @@ Host-side Claude Code skills (slash commands) for managing the NanoClaw installa
 | `docs-sync/` | Repo-wide documentation sync (AGENTS.md hierarchy, CLAUDE.md, docs/) |
 | `git-sync/` | Pull, auto-commit pending changes, push — leaves clean slate |
 | `gws-renew/` | Renew Google Workspace OAuth refresh tokens and push to Doppler (`nanoclaw-ai`/`prd`) |
+| `claude-renew/` | Renew the Claude Code OAuth subscription token (`CLAUDE_CODE_OAUTH_TOKEN`) and push to Doppler |
 
 ## For AI Agents
 
