@@ -27,9 +27,9 @@ Main application source code for the NanoClaw host process. This single Node.js 
 | `logger.ts` | Structured logger (pino) |
 | `env.ts` | Safe .env file reader (non-secret values only) |
 | `timezone.ts` | Timezone utilities for scheduled task cron parsing |
-| `formatting.ts` | Text formatting helpers |
 | `transcription.ts` | Voice message transcription integration |
 | `whatsapp-auth.ts` | WhatsApp authentication helpers |
+| `session-cleanup.ts` | Per-group session pruning and stale data cleanup |
 
 ## Subdirectories
 

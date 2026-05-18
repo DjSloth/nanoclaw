@@ -16,6 +16,7 @@ Each skill is a directory containing a `SKILL.md` file (and optionally an execut
 | `co-architect/` | Senior architect persona for design discussions |
 | `gh-cli/` | GitHub CLI usage patterns for agents |
 | `git-commit/` | Atomic git commit workflow with conventional commit format |
+| `graphify/` | Knowledge graph generation from code/docs/papers (uses `graphifyy` PyPI CLI baked into image) |
 | `github-issue-creator/` | Creates GitHub issues from agent context |
 | `merge-manager/` | Git merge conflict resolution workflow |
 | `persona-exec-assistant/` | Executive assistant persona configuration |
@@ -29,6 +30,7 @@ Each skill is a directory containing a `SKILL.md` file (and optionally an execut
 | `surfline/` | Surf forecast data lookup |
 | `typescript-advanced-types/` | Advanced TypeScript type patterns reference |
 | `webapp-testing/` | Web application testing workflow |
+| `youtube/` | Inspect, transcribe, or download any YouTube video by URL (uses `yt-dlp` + `ffmpeg` baked into image) |
 
 ## For AI Agents
 

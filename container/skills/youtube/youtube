@@ -1,0 +1,226 @@
+#!/usr/bin/env bash
+# youtube — fetch metadata, transcript, audio, or frames from a YouTube URL.
+#
+# Wraps yt-dlp + ffmpeg with subcommands tuned for "agent reads a YouTube link"
+# use cases. Defaults bias toward the cheapest answer (metadata, transcript)
+# and only download bytes when the caller explicitly asks for them.
+set -euo pipefail
+
+YT_DLP=(python3 -m yt_dlp)
+
+usage() {
+  cat <<'EOF'
+Usage: youtube <command> <url> [options]
+
+Commands:
+  info       <url>
+  transcript <url> [--lang en] [--with-timestamps]
+  audio      <url> [--out DIR]
+  frames     <url> [--n 12] [--out DIR]
+  download   <url> [--out DIR] [--max-height 720]
+
+See SKILL.md for details and patterns.
+EOF
+}
+
+require_url() {
+  if [[ -z "${1:-}" ]]; then
+    echo "error: missing <url>" >&2
+    usage >&2
+    exit 1
+  fi
+}
+
+video_id() {
+  "${YT_DLP[@]}" --quiet --no-warnings --print id "$1"
+}
+
+cmd_info() {
+  require_url "${1:-}"
+  local url="$1"
+  "${YT_DLP[@]}" --quiet --no-warnings --dump-json --skip-download "$url" \
+    | jq '{
+        id,
+        title,
+        channel,
+        duration_sec: .duration,
+        upload_date,
+        view_count,
+        has_captions: (((.subtitles // {}) | length) > 0
+                        or ((.automatic_captions // {}) | length) > 0),
+        description: ((.description // "") | .[0:1000])
+      }'
+}
+
+cmd_transcript() {
+  require_url "${1:-}"
+  local url="$1"; shift
+  local lang="en"
+  local with_ts=false
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --lang) lang="$2"; shift 2 ;;
+      --with-timestamps) with_ts=true; shift ;;
+      *) echo "error: unknown option: $1" >&2; exit 1 ;;
+    esac
+  done
+
+  local tmp
+  tmp=$(mktemp -d)
+  trap 'rm -rf "${tmp:-}"' EXIT
+
+  # YouTube uses some legacy ISO-639-1 codes for caption tracks (notably
+  # he → iw, id → in). Pass both modern and legacy codes so callers don't
+  # have to know which one the video uses.
+  local sub_langs="$lang"
+  case "$lang" in
+    he) sub_langs="iw,he" ;;
+    iw) sub_langs="iw,he" ;;
+    id) sub_langs="in,id" ;;
+  esac
+
+  # --remote-components ejs:github lets yt-dlp pull YouTube's challenge
+  # solver scripts at runtime (paired with deno). Without it, n-challenge
+  # solving is partial and many videos return HTTP 429 on caption fetches.
+  # yt-dlp's own non-zero exit on a missing language must not kill the
+  # script — we emit our own friendly "no captions" message below.
+  set +e
+  "${YT_DLP[@]}" --quiet --no-warnings \
+    --remote-components ejs:github \
+    --skip-download \
+    --write-auto-subs --write-subs --sub-lang "$sub_langs" \
+    --sub-format vtt \
+    -o "$tmp/%(id)s" "$url" >/dev/null 2>&1
+  set -e
+
+  local vtt
+  vtt=$(find "$tmp" -maxdepth 1 -name '*.vtt' | head -n1 || true)
+  if [[ -z "$vtt" ]]; then
+    echo "error: no captions available for $url (lang=$lang)" >&2
+    exit 2
+  fi
+
+  if [[ "$with_ts" == true ]]; then
+    cat "$vtt"
+    return
+  fi
+
+  # Strip WebVTT cue numbers, timestamp lines, headers, NOTE/STYLE blocks,
+  # and inline tags. Collapse runs of blank lines.
+  awk '
+    BEGIN { inblock = 0 }
+    /^WEBVTT/ { next }
+    /^Kind:/ { next }
+    /^Language:/ { next }
+    /^(NOTE|STYLE)( |$)/ { inblock = 1; next }
+    inblock && /^$/ { inblock = 0; next }
+    inblock { next }
+    /-->/ { next }
+    /^[0-9]+$/ { next }
+    { gsub(/<[^>]+>/, ""); print }
+  ' "$vtt" \
+    | awk 'NF { print; blank = 0; next } !blank { print ""; blank = 1 }'
+}
+
+cmd_audio() {
+  require_url "${1:-}"
+  local url="$1"; shift
+  local out_dir="/tmp/youtube"
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --out) out_dir="$2"; shift 2 ;;
+      *) echo "error: unknown option: $1" >&2; exit 1 ;;
+    esac
+  done
+  mkdir -p "$out_dir"
+
+  local id
+  id=$(video_id "$url")
+  "${YT_DLP[@]}" --quiet --no-warnings \
+    -f bestaudio \
+    --extract-audio --audio-format mp3 --audio-quality 192K \
+    -o "$out_dir/%(id)s.%(ext)s" "$url" >/dev/null
+  echo "$out_dir/$id.mp3"
+}
+
+cmd_frames() {
+  require_url "${1:-}"
+  local url="$1"; shift
+  local n=12
+  local out_dir=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --n) n="$2"; shift 2 ;;
+      --out) out_dir="$2"; shift 2 ;;
+      *) echo "error: unknown option: $1" >&2; exit 1 ;;
+    esac
+  done
+
+  local id
+  id=$(video_id "$url")
+  out_dir="${out_dir:-/tmp/youtube/$id}"
+  mkdir -p "$out_dir"
+
+  local tmp_mp4
+  tmp_mp4=$(mktemp --suffix=.mp4)
+  trap 'rm -f "${tmp_mp4:-}"' EXIT
+
+  "${YT_DLP[@]}" --quiet --no-warnings \
+    -f 'bestvideo[height<=720][ext=mp4]+bestaudio/bestvideo[height<=720]+bestaudio/best[height<=720]/best' \
+    --merge-output-format mp4 \
+    -o "$tmp_mp4" "$url" >/dev/null
+
+  local duration
+  duration=$(ffprobe -v error -show_entries format=duration -of csv=p=0 "$tmp_mp4")
+
+  python3 - "$tmp_mp4" "$out_dir" "$n" "$duration" <<'PY'
+import math, subprocess, sys
+src, out_dir, n, duration = sys.argv[1], sys.argv[2], int(sys.argv[3]), float(sys.argv[4])
+for i in range(n):
+    t = (i + 0.5) * duration / n
+    out = f"{out_dir}/frame_{i:02d}.jpg"
+    subprocess.run(
+        ["ffmpeg", "-loglevel", "error", "-y",
+         "-ss", f"{t:.3f}", "-i", src,
+         "-frames:v", "1", "-q:v", "2", out],
+        check=True,
+    )
+PY
+
+  echo "$out_dir"
+}
+
+cmd_download() {
+  require_url "${1:-}"
+  local url="$1"; shift
+  local out_dir="/tmp/youtube"
+  local max_h=720
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --out) out_dir="$2"; shift 2 ;;
+      --max-height) max_h="$2"; shift 2 ;;
+      *) echo "error: unknown option: $1" >&2; exit 1 ;;
+    esac
+  done
+  mkdir -p "$out_dir"
+
+  local id
+  id=$(video_id "$url")
+  "${YT_DLP[@]}" --quiet --no-warnings \
+    -f "bestvideo[height<=${max_h}][ext=mp4]+bestaudio/bestvideo[height<=${max_h}]+bestaudio/best[height<=${max_h}]/best" \
+    --merge-output-format mp4 \
+    -o "$out_dir/%(id)s.%(ext)s" "$url" >/dev/null
+  echo "$out_dir/$id.mp4"
+}
+
+cmd="${1:-}"
+shift || true
+case "$cmd" in
+  info)        cmd_info       "$@" ;;
+  transcript)  cmd_transcript "$@" ;;
+  audio)       cmd_audio      "$@" ;;
+  frames)      cmd_frames     "$@" ;;
+  download)    cmd_download   "$@" ;;
+  -h|--help|"") usage ;;
+  *) echo "error: unknown command: $cmd" >&2; usage >&2; exit 1 ;;
+esac

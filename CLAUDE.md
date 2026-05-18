@@ -37,6 +37,8 @@ Single Node.js process that connects to WhatsApp, routes messages to Claude Agen
 | `/get-qodo-rules` | Load org- and repo-level coding rules from Qodo before code tasks |
 | `/docs-sync` | Sync AGENTS.md hierarchy, CLAUDE.md, and docs/ against current code |
 | `/git-sync` | Pull, auto-commit pending changes, push — clean slate |
+| `/gws-renew` | Renew Google Workspace OAuth refresh tokens and push to Doppler |
+| `/claude-renew` | Renew the Claude Code OAuth subscription token and push to Doppler |
 
 ## Commands
 

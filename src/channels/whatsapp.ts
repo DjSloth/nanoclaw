@@ -22,6 +22,7 @@ import {
   setLastGroupSync,
   updateChatName,
 } from '../db.js';
+import { InflightTracker } from '../inflight-tracker.js';
 import { logger } from '../logger.js';
 import { isVoiceMessage, transcribeAudioMessage } from '../transcription.js';
 import { Channel, OnInboundMessage, OnChatMetadata, RegisteredGroup } from '../types.js';
@@ -44,6 +45,7 @@ export class WhatsAppChannel implements Channel {
   private outgoingQueue: Array<{ jid: string; text: string }> = [];
   private flushing = false;
   private groupSyncTimerStarted = false;
+  private readonly inflight = new InflightTracker<string>();
 
   private opts: WhatsAppChannelOpts;
 
@@ -167,6 +169,7 @@ export class WhatsAppChannel implements Channel {
         // Translate LID JID to phone JID if applicable
         const chatJid = await this.translateJid(rawJid);
 
+        const work = (async () => {
         const timestamp = new Date(
           Number(msg.messageTimestamp) * 1000,
         ).toISOString();
@@ -289,6 +292,9 @@ export class WhatsAppChannel implements Channel {
             images,
           });
         }
+        })();
+        this.inflight.track(chatJid, work);
+        await work;
       }
     });
   }
@@ -323,6 +329,10 @@ export class WhatsAppChannel implements Channel {
 
   ownsJid(jid: string): boolean {
     return jid.endsWith('@g.us') || jid.endsWith('@s.whatsapp.net');
+  }
+
+  async awaitInflight(chatJid: string): Promise<void> {
+    await this.inflight.awaitAll(chatJid);
   }
 
   async disconnect(): Promise<void> {

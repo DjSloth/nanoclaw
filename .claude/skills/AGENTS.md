@@ -14,6 +14,7 @@ Host-side Claude Code skills (slash commands) for managing the NanoClaw installa
 | `customize/` | Add channels, integrations, and behavioral changes |
 | `debug/` | Container diagnostics, log inspection, troubleshooting |
 | `update/` | Pull upstream changes, merge customizations, run migrations |
+| `check-upstream/` | Read-only upstream diff with risk-rated cherry-pick suggestions (safer alternative to `update/`) |
 | `add-discord/` | Install Discord channel integration |
 | `add-gmail/` | Install Gmail integration |
 | `add-parallel/` | Add Parallel AI web research MCP |
@@ -29,6 +30,8 @@ Host-side Claude Code skills (slash commands) for managing the NanoClaw installa
 | `get-qodo-rules/` | Load org/repo coding rules from Qodo |
 | `docs-sync/` | Repo-wide documentation sync (AGENTS.md hierarchy, CLAUDE.md, docs/) |
 | `git-sync/` | Pull, auto-commit pending changes, push — leaves clean slate |
+| `gws-renew/` | Renew Google Workspace OAuth refresh tokens and push to Doppler (`nanoclaw-ai`/`prd`) |
+| `claude-renew/` | Renew the Claude Code OAuth subscription token (`CLAUDE_CODE_OAUTH_TOKEN`) and push to Doppler |
 
 ## For AI Agents
 

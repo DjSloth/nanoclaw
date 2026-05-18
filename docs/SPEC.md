@@ -76,7 +76,7 @@ A personal Claude assistant accessible via WhatsApp, with persistent memory per 
 | WhatsApp Connection | Node.js (@whiskeysockets/baileys) | Connect to WhatsApp, send/receive messages |
 | Message Storage | SQLite (better-sqlite3) | Store messages for polling |
 | Container Runtime | Containers (Linux VMs) | Isolated environments for agent execution |
-| Agent | @anthropic-ai/claude-agent-sdk (0.2.29) | Run Claude with tools and MCP servers |
+| Agent | @anthropic-ai/claude-agent-sdk (^0.2.92) | Run Claude with tools and MCP servers |
 | Browser Automation | agent-browser + Chromium | Web interaction and screenshots |
 | Runtime | Node.js 20+ | Host process for routing and scheduling |
 
@@ -122,22 +122,23 @@ nanoclaw/
 │   │   └── src/
 │   │       ├── index.ts           # Entry point (query loop, IPC polling, session resume)
 │   │       └── ipc-mcp-stdio.ts   # Stdio-based MCP server for host communication
-│   └── skills/
-│       └── agent-browser.md       # Browser automation skill
+│   ├── scripts/                   # In-container helper scripts (init-git-creds.sh, init-gws-creds.sh)
+│   └── skills/                    # Per-skill directories — each contains SKILL.md (and optional executable)
+│       ├── agent-browser/         # Browser automation (Chromium via Bash)
+│       └── …                      # See container/skills/AGENTS.md for the full list
 │
 ├── dist/                          # Compiled JavaScript (gitignored)
 │
 ├── .claude/
-│   └── skills/
+│   ├── agents/                        # Sub-agent definitions (container-debugger, skill-developer, pr-reviewer)
+│   ├── rules/                         # Always-loaded coding/security rules
+│   └── skills/                        # Host-side slash commands — see .claude/skills/AGENTS.md for the full list
 │       ├── setup/SKILL.md              # /setup - First-time installation
 │       ├── customize/SKILL.md          # /customize - Add capabilities
 │       ├── debug/SKILL.md              # /debug - Container debugging
-│       ├── add-telegram/SKILL.md       # /add-telegram - Telegram channel
-│       ├── add-gmail/SKILL.md          # /add-gmail - Gmail integration
-│       ├── add-voice-transcription/    # /add-voice-transcription - Whisper
-│       ├── x-integration/SKILL.md      # /x-integration - X/Twitter
-│       ├── convert-to-apple-container/  # /convert-to-apple-container - Apple Container runtime
-│       └── add-parallel/SKILL.md       # /add-parallel - Parallel agents
+│       ├── update/SKILL.md             # /update - Pull upstream changes (merge/migrate)
+│       ├── check-upstream/SKILL.md     # /check-upstream - Read-only upstream diff
+│       └── …                           # add-telegram, add-gmail, add-discord, add-voice-transcription, add-parallel, add-pdf-reader, add-reactions, add-compact, add-telegram-swarm, x-integration, convert-to-apple-container, qodo-pr-resolver, get-qodo-rules, docs-sync, git-sync
 │
 ├── groups/
 │   ├── CLAUDE.md                  # Global memory (all groups read this)

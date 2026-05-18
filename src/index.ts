@@ -238,7 +238,11 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
   const prompt = formatMessages(missedMessages, TIMEZONE);
 
-  // Collect and clear any pending images for this chat
+  // Let any in-flight inbound-message handlers finish — their downloads may
+  // still be racing toward pendingImages. Resolves immediately if there are
+  // no pending handlers or the channel does not track them.
+  await channel.awaitInflight?.(chatJid);
+
   const images = pendingImages.get(chatJid);
   pendingImages.delete(chatJid);
 

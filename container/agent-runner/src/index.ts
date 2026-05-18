@@ -61,6 +61,16 @@ interface SDKUserMessage {
 
 const MAX_IMAGE_DIM = 2000;
 
+const ESCALATION_RULES = `# Model Escalation
+
+You are the primary conversational agent (Haiku). Delegate to subagents via the Task tool when work exceeds quick lookup or chat:
+
+- **model=sonnet** — file edits, multi-step task execution, running commands, skill invocations that change state.
+- **model=opus** — multi-step reasoning, architectural decisions, debugging from symptoms to root cause, plan synthesis, security/logic analysis.
+- **stay on haiku** — direct questions answerable from one tool call or memory, status checks, formatting, summarization, conversational replies.
+
+Rule of thumb: if you're about to think out loud for more than ~3 steps, or the user asked "why/how should we", spawn a Task with the right model instead of answering inline.`;
+
 function getImageDimensions(data: string, mimeType: string): { width: number; height: number } | null {
   try {
     const buf = Buffer.from(data, 'base64');
@@ -458,10 +468,12 @@ async function runQuery(
       additionalDirectories: extraDirs.length > 0 ? extraDirs : undefined,
       resume: sessionId,
       resumeSessionAt: resumeAt,
-      systemPrompt: globalClaudeMd
-        ? { type: 'preset' as const, preset: 'claude_code' as const, append: globalClaudeMd }
-        : undefined,
-      model: 'sonnet[1m]',
+      systemPrompt: {
+        type: 'preset' as const,
+        preset: 'claude_code' as const,
+        append: [ESCALATION_RULES, globalClaudeMd].filter(Boolean).join('\n\n'),
+      },
+      model: 'haiku',
       allowedTools: [
         'Bash',
         'Read', 'Write', 'Edit', 'Glob', 'Grep',
