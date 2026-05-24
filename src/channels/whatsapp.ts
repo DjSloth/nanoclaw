@@ -27,6 +27,32 @@ import { logger } from '../logger.js';
 import { isVoiceMessage, transcribeAudioMessage } from '../transcription.js';
 import { Channel, OnInboundMessage, OnChatMetadata, RegisteredGroup } from '../types.js';
 import { registerChannel } from './registry.js';
+import { unwrapMessageContent } from './whatsapp-unwrap.js';
+
+// Body keys we either deliver directly or intentionally drop. Anything outside
+// this set landing in a registered group fires the canary warn below so we
+// notice new WhatsApp message shapes before they silently strand users.
+const KNOWN_BODY_KEYS = new Set([
+  'conversation',
+  'extendedTextMessage',
+  'imageMessage',
+  'videoMessage',
+  'audioMessage',
+  'documentMessage',
+  'stickerMessage',
+  'contactMessage',
+  'locationMessage',
+  'liveLocationMessage',
+  'reactionMessage',
+  'pollCreationMessage',
+  'pollCreationMessageV2',
+  'pollCreationMessageV3',
+  'pollUpdateMessage',
+  'protocolMessage',
+  'senderKeyDistributionMessage',
+  'messageContextInfo',
+  'editedMessage',
+]);
 
 const GROUP_SYNC_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
 
@@ -181,11 +207,15 @@ export class WhatsAppChannel implements Channel {
         // Only deliver full message for registered groups
         const groups = this.opts.registeredGroups();
         if (groups[chatJid]) {
+          // Unwrap disappearing / view-once / caption envelopes so inner
+          // fields (imageMessage, extendedTextMessage, …) are reachable.
+          const body = unwrapMessageContent(msg.message);
+
           const content =
-            msg.message?.conversation ||
-            msg.message?.extendedTextMessage?.text ||
-            msg.message?.imageMessage?.caption ||
-            msg.message?.videoMessage?.caption ||
+            body?.conversation ||
+            body?.extendedTextMessage?.text ||
+            body?.imageMessage?.caption ||
+            body?.videoMessage?.caption ||
             '';
 
           const sender = msg.key.participant || msg.key.remoteJid || '';
@@ -202,7 +232,7 @@ export class WhatsAppChannel implements Channel {
 
           // Transcribe voice messages before storing
           let finalContent = content;
-          if (isVoiceMessage(msg)) {
+          if (isVoiceMessage(body)) {
             try {
               const transcript = await transcribeAudioMessage(msg, this.sock);
               if (transcript) {
@@ -219,7 +249,7 @@ export class WhatsAppChannel implements Channel {
 
           // Download image attachment if present
           let images: Array<{ data: string; mimeType: string }> | undefined;
-          const imgMsg = msg.message?.imageMessage;
+          const imgMsg = body?.imageMessage;
           if (imgMsg) {
             try {
               const buffer = (await downloadMediaMessage(
@@ -239,7 +269,7 @@ export class WhatsAppChannel implements Channel {
           }
 
           // Extract text from document attachments (txt, pdf, docx, etc.)
-          const docMsg = msg.message?.documentMessage;
+          const docMsg = body?.documentMessage;
           if (docMsg) {
             const filename = docMsg.fileName || 'document';
             const mimetype = docMsg.mimetype || '';
@@ -277,6 +307,16 @@ export class WhatsAppChannel implements Channel {
             } catch (err) {
               logger.warn({ err, filename, mimetype }, 'Failed to extract document text');
               finalContent = `[Document: ${filename} — failed to extract content]`;
+            }
+          }
+
+          // Canary: surface message shapes we don't recognise so we notice new
+          // wrappers (or new top-level message types) before they silently
+          // strand a user's content.
+          if (body) {
+            const unknownKeys = Object.keys(body).filter((k) => !KNOWN_BODY_KEYS.has(k));
+            if (unknownKeys.length > 0) {
+              logger.warn({ chatJid, unknownKeys }, 'Unhandled WhatsApp message body keys');
             }
           }
 

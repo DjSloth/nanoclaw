@@ -29,7 +29,7 @@ vi.mock('../db.js', () => ({
 
 // Mock transcription
 vi.mock('../transcription.js', () => ({
-  isVoiceMessage: vi.fn((msg: any) => msg.message?.audioMessage?.ptt === true),
+  isVoiceMessage: vi.fn((body: any) => body?.audioMessage?.ptt === true),
   transcribeAudioMessage: vi.fn().mockResolvedValue('Hello this is a voice message'),
 }));
 
@@ -469,6 +469,103 @@ describe('WhatsAppChannel', () => {
       expect(opts.onMessage).toHaveBeenCalledWith(
         'registered@g.us',
         expect.objectContaining({ content: 'Check this photo' }),
+      );
+    });
+
+    it('extracts caption from imageMessage wrapped in ephemeralMessage (disappearing chats)', async () => {
+      const opts = createTestOpts();
+      const channel = new WhatsAppChannel(opts);
+
+      await connectChannel(channel);
+
+      await triggerMessages([
+        {
+          key: {
+            id: 'msg-eph',
+            remoteJid: 'registered@g.us',
+            participant: '5551234@s.whatsapp.net',
+            fromMe: false,
+          },
+          message: {
+            ephemeralMessage: {
+              message: {
+                imageMessage: { caption: 'Vanishing photo', mimetype: 'image/jpeg' },
+              },
+            },
+          },
+          pushName: 'Eve',
+          messageTimestamp: Math.floor(Date.now() / 1000),
+        },
+      ]);
+
+      expect(opts.onMessage).toHaveBeenCalledWith(
+        'registered@g.us',
+        expect.objectContaining({ content: 'Vanishing photo' }),
+      );
+    });
+
+    it('extracts caption from imageMessage wrapped in viewOnceMessageV2', async () => {
+      const opts = createTestOpts();
+      const channel = new WhatsAppChannel(opts);
+
+      await connectChannel(channel);
+
+      await triggerMessages([
+        {
+          key: {
+            id: 'msg-vo',
+            remoteJid: 'registered@g.us',
+            participant: '5551234@s.whatsapp.net',
+            fromMe: false,
+          },
+          message: {
+            viewOnceMessageV2: {
+              message: {
+                imageMessage: { caption: 'one-shot', mimetype: 'image/jpeg' },
+              },
+            },
+          },
+          pushName: 'Frank',
+          messageTimestamp: Math.floor(Date.now() / 1000),
+        },
+      ]);
+
+      expect(opts.onMessage).toHaveBeenCalledWith(
+        'registered@g.us',
+        expect.objectContaining({ content: 'one-shot' }),
+      );
+    });
+
+    it('warns when a registered group receives an unknown message body shape', async () => {
+      const { logger } = await import('../logger.js');
+      const opts = createTestOpts();
+      const channel = new WhatsAppChannel(opts);
+
+      await connectChannel(channel);
+
+      await triggerMessages([
+        {
+          key: {
+            id: 'msg-mystery',
+            remoteJid: 'registered@g.us',
+            participant: '5551234@s.whatsapp.net',
+            fromMe: false,
+          },
+          message: {
+            // A made-up shape that exercises the canary warn.
+            futureUnknownMessage: { foo: 'bar' },
+          },
+          pushName: 'Gina',
+          messageTimestamp: Math.floor(Date.now() / 1000),
+        },
+      ]);
+
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.objectContaining({
+          chatJid: 'registered@g.us',
+          unknownKeys: ['futureUnknownMessage'],
+        }),
+        'Unhandled WhatsApp message body keys',
       );
     });
 

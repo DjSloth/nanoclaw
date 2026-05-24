@@ -1,3 +1,4 @@
+import type { proto } from '@whiskeysockets/baileys';
 import { downloadMediaMessage } from '@whiskeysockets/baileys';
 import { WAMessage, WASocket } from '@whiskeysockets/baileys';
 
@@ -101,6 +102,6 @@ export async function transcribeAudioMessage(
   }
 }
 
-export function isVoiceMessage(msg: WAMessage): boolean {
-  return msg.message?.audioMessage?.ptt === true;
+export function isVoiceMessage(body: proto.IMessage | null | undefined): boolean {
+  return body?.audioMessage?.ptt === true;
 }
