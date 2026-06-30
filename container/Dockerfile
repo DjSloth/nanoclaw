@@ -64,6 +64,14 @@ RUN pip3 install --break-system-packages --pre "yt-dlp[default,curl-cffi]"
 # extraction (needed for newer videos and auto-translated captions).
 RUN curl -fsSL https://deno.land/install.sh | DENO_INSTALL=/usr/local sh
 
+# Install curl-impersonate — TLS fingerprinting binary used by the surfline skill
+# to bypass Cloudflare bot challenges on services.surfline.com.
+RUN curl -fsSL -o /tmp/curl-impersonate.tar.gz \
+      "https://github.com/lexiforest/curl-impersonate/releases/download/v1.1.2/curl-impersonate-v1.1.2.x86_64-linux-gnu.tar.gz" \
+    && tar -xzf /tmp/curl-impersonate.tar.gz -C /usr/local/bin/ \
+    && rm /tmp/curl-impersonate.tar.gz \
+    && chmod +x /usr/local/bin/curl-impersonate /usr/local/bin/curl_chrome* /usr/local/bin/curl_firefox* /usr/local/bin/curl_edge* /usr/local/bin/curl_safari* /usr/local/bin/curl_tor*
+
 # Create app directory
 WORKDIR /app
 

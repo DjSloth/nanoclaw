@@ -3,6 +3,11 @@ set -uo pipefail
 
 SURFLINE_BASE="https://services.surfline.com"
 SG_BASE="https://api.stormglass.io/v2"
+
+# TLS-fingerprinted curl for Surfline (Cloudflare bot detection bypass).
+# Stormglass and Contentful CDN calls use plain curl — no CF challenge there.
+SL_CURL="curl_chrome136"
+command -v "$SL_CURL" >/dev/null 2>&1 || SL_CURL="curl"
 SG_PARAMS="swellHeight,swellPeriod,swellDirection,secondarySwellHeight,secondarySwellPeriod,secondarySwellDirection,waveHeight,wavePeriod,waveDirection,windSpeed,windDirection,gust"
 
 # Spot coordinates lookup (for Stormglass calls)
@@ -102,7 +107,7 @@ cmd_conditions() {
   local url="${SURFLINE_BASE}/kbyg/spots/reports?spotId=${spot_id}"
 
   local json
-  json=$(curl -sf --max-time 15 "$url") || { echo "Error: failed to fetch conditions for ${spot_id}"; exit 1; }
+  json=$("$SL_CURL" -sf --max-time 15 "$url") || { echo "Error: failed to fetch conditions for ${spot_id}"; exit 1; }
 
   local name rating
   name=$(echo "$json" | jq -r '.spot.name // "Unknown"')
@@ -245,16 +250,16 @@ cmd_forecast() {
   local sunlight_url="${SURFLINE_BASE}/kbyg/spots/forecasts/sunlight?spotId=${spot_id}&days=${days}${auth_param}"
 
   local wave_json wind_json rating_json swells_json sunlight_json consistency_json
-  wave_json=$(curl -sf --max-time 15 "$wave_url") || { echo "Error: failed to fetch wave forecast for ${spot_id}"; exit 1; }
-  wind_json=$(curl -sf --max-time 15 "$wind_url") || { echo "Error: failed to fetch wind forecast for ${spot_id}"; exit 1; }
-  rating_json=$(curl -sf --max-time 15 "$rating_url") || { echo "Error: failed to fetch rating forecast for ${spot_id}"; exit 1; }
-  swells_json=$(curl -sf --max-time 15 "$swells_url" 2>/dev/null || echo '{"data":{"swells":[]}}')
-  sunlight_json=$(curl -sf --max-time 15 "$sunlight_url" 2>/dev/null || echo '{"data":{"sunlight":[]}}')
+  wave_json=$("$SL_CURL" -sf --max-time 15 "$wave_url") || { echo "Error: failed to fetch wave forecast for ${spot_id}"; exit 1; }
+  wind_json=$("$SL_CURL" -sf --max-time 15 "$wind_url") || { echo "Error: failed to fetch wind forecast for ${spot_id}"; exit 1; }
+  rating_json=$("$SL_CURL" -sf --max-time 15 "$rating_url") || { echo "Error: failed to fetch rating forecast for ${spot_id}"; exit 1; }
+  swells_json=$("$SL_CURL" -sf --max-time 15 "$swells_url" 2>/dev/null || echo '{"data":{"swells":[]}}')
+  sunlight_json=$("$SL_CURL" -sf --max-time 15 "$sunlight_url" 2>/dev/null || echo '{"data":{"sunlight":[]}}')
 
   # Consistency requires access token (premium endpoint)
   if [ -n "$tok" ]; then
     local consistency_url="${SURFLINE_BASE}/kbyg/spots/forecasts/consistency?spotId=${spot_id}&days=${days}&intervalHours=1&accesstoken=${tok}"
-    consistency_json=$(curl -sf --max-time 15 "$consistency_url" 2>/dev/null || echo '{"data":{"consistency":[]}}')
+    consistency_json=$("$SL_CURL" -sf --max-time 15 "$consistency_url" 2>/dev/null || echo '{"data":{"consistency":[]}}')
   else
     consistency_json='{"data":{"consistency":[]}}'
   fi
@@ -382,7 +387,7 @@ cmd_search() {
   local url="${SURFLINE_BASE}/search/site?q=${encoded_query}&querySize=5"
 
   local json
-  json=$(curl -sf --max-time 15 "$url") || { echo "Error: search failed"; exit 1; }
+  json=$("$SL_CURL" -sf --max-time 15 "$url") || { echo "Error: search failed"; exit 1; }
 
   local count
   count=$(echo "$json" | jq '[.[0].hits.hits // [] | .[]] | length')
@@ -408,7 +413,7 @@ cmd_region() {
   local url="${SURFLINE_BASE}/search/site?q=${encoded_query}&querySize=${size}"
 
   local json
-  json=$(curl -sf --max-time 15 "$url") || { echo "Error: search failed"; exit 1; }
+  json=$("$SL_CURL" -sf --max-time 15 "$url") || { echo "Error: search failed"; exit 1; }
 
   local subregion_count spot_count
   subregion_count=$(echo "$json" | jq '[.[1].hits.hits // [] | .[]] | length')
@@ -445,7 +450,7 @@ cmd_details() {
   local url="${SURFLINE_BASE}/kbyg/spots/reports?spotId=${spot_id}"
 
   local json
-  json=$(curl -sf --max-time 15 "$url") || { echo "Error: failed to fetch details for ${spot_id}"; exit 1; }
+  json=$("$SL_CURL" -sf --max-time 15 "$url") || { echo "Error: failed to fetch details for ${spot_id}"; exit 1; }
 
   local td='.spot.travelDetails'
 
